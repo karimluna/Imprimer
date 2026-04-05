@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+
+  gateway:
+    name: Go gateway
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+
+      - name: Install protoc
+        run: |
+          sudo apt-get install -y protobuf-compiler
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+      - name: Regenerate proto
+        run: |
+          protoc -I proto \
+            --go_out=gateway/gen \
+            --go-grpc_out=gateway/gen \
+            --go_opt=paths=source_relative \
+            --go-grpc_opt=paths=source_relative \
+            proto/imprimer.proto
+
+      - name: Build
+        run: go build ./gateway/...
+
+      - name: Vet
+        run: go vet ./gateway/...
+
+  engine:
+    name: Python engine
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          cd engine
+          pip install -r requirements.txt
+
+      - name: Install grpc tools
+        run: pip install grpcio-tools
+
+      - name: Regenerate proto
+        run: |
+          python -m grpc_tools.protoc \
+            -I proto \
+            --python_out=engine \
+            --grpc_python_out=engine \
+            proto/imprimer.proto
+
+      - name: Import check
+        run: |
+          cd engine
+          python -c "from core.chains.prompt_chain import run_variant; print('chains ok')"
+          python -c "from core.evaluator.scorer import score; print('scorer ok')"
+          python -c "from security.injection_guard import scan_request; print('security ok')"
+          python -c "from observability.tracer import log_eval; print('tracer ok')"
+          python -c "from core.registry.prompt_store import init_db; print('registry ok')"
