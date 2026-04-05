@@ -1,7 +1,7 @@
 """
 Imprimer engine, gRPC entrypoint.
 
-This may be described as the cognitive layer.
+This is the cognitive layer
 """
 import grpc
 from concurrent import futures
@@ -9,49 +9,116 @@ from concurrent import futures
 import imprimer_pb2
 import imprimer_pb2_grpc
 
-from core.chains.prompt_chain import run_variant
+from core.chains.prompt_chain import run_variant, ModelBackend
 from core.evaluator.scorer import score
+from core.registry.prompt_store import init_db, save, EvalRecord
+from observability.tracer import log_eval, EvalTrace, reachability_gap_report
+from security.injection_guard import scan_request, InjectionDetected
 from utils.create_logger import get_logger
 
 logger = get_logger(__name__)
 
 
 class PromptEngineServicer(imprimer_pb2_grpc.PromptEngineServicer):
-    """
-    Python implementation of the gRPC contract.
-    One method per RPC defined in imprimer.proto.
-    Go calls EvaluatePrompt → this runs → result returns to Go.
-    """
 
     def EvaluatePrompt(self, request, context):
-        logger.info(f"trace={request.trace_id} task={request.task}")
+        logger.info(
+            f"trace={request.trace_id} "
+            f"task={request.task} "
+            f"backend={request.backend}"
+        )
 
+        # Security gate — scan before any LLM interaction
+        try:
+            scan_request(
+                trace_id=request.trace_id,
+                input_text=request.input,
+                variant_a=request.variant_a,
+                variant_b=request.variant_b,
+            )
+        except InjectionDetected as e:
+            context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+            context.set_details(str(e))
+            return imprimer_pb2.EvaluateResponse()
+
+        # Resolve backend
+        backend_str = request.backend.lower() if request.backend else "ollama"
+        try:
+            backend = ModelBackend(backend_str)
+        except ValueError:
+            logger.warning(
+                f"trace={request.trace_id} "
+                f"unknown backend '{backend_str}', falling back to ollama"
+            )
+            backend = ModelBackend.OLLAMA
+
+        # Activate both candidate minds
         result_a = run_variant(
             template=request.variant_a,
             input_text=request.input,
             task=request.task,
+            backend=backend,
         )
         result_b = run_variant(
             template=request.variant_b,
             input_text=request.input,
             task=request.task,
+            backend=backend,
         )
 
         score_a = score(result_a)
         score_b = score(result_b)
         winner = "a" if score_a.combined >= score_b.combined else "b"
 
+        # Option C — reachability gap report
+        gap_report = reachability_gap_report(
+            trace_id=request.trace_id,
+            reachability_a=score_a.reachability,
+            reachability_b=score_b.reachability,
+            winner=winner,
+        )
+
+        # Option B — persist to registry
+        save(EvalRecord(
+            trace_id=request.trace_id,
+            task=request.task,
+            backend=backend_str,
+            variant_a=request.variant_a,
+            variant_b=request.variant_b,
+            winner=winner,
+            reachability_a=score_a.reachability,
+            reachability_b=score_b.reachability,
+            score_a=score_a.combined,
+            score_b=score_b.combined,
+            latency_a_ms=result_a.latency_ms,
+            latency_b_ms=result_b.latency_ms,
+            gap_report=gap_report,
+        ))
+
+        # Structured audit trace
+        log_eval(EvalTrace(
+            trace_id=request.trace_id,
+            task=request.task,
+            backend=backend_str,
+            winner=winner,
+            reachability_a=score_a.reachability,
+            reachability_b=score_b.reachability,
+            score_a=score_a.combined,
+            score_b=score_b.combined,
+            latency_a_ms=result_a.latency_ms,
+            latency_b_ms=result_b.latency_ms,
+            variant_a=request.variant_a,
+            variant_b=request.variant_b,
+        ))
+
         logger.info(
             f"trace={request.trace_id} "
             f"winner={winner} "
-            f"score_a={score_a.combined} "
-            f"score_b={score_b.combined} "
             f"reachability_a={score_a.reachability} "
-            f"reachability_b={score_b.reachability}"
+            f"reachability_b={score_b.reachability} "
+            f"gap={gap_report[:60]}..."
         )
 
-        # Field names must match the proto exactly:
-        # latency_a not latency_a_ms — the proto fields are latency_a / latency_b
         return imprimer_pb2.EvaluateResponse(
             trace_id=request.trace_id,
             winner=winner,
@@ -65,6 +132,7 @@ class PromptEngineServicer(imprimer_pb2_grpc.PromptEngineServicer):
 
 
 def serve():
+    init_db()
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=4))
     imprimer_pb2_grpc.add_PromptEngineServicer_to_server(
         PromptEngineServicer(), server

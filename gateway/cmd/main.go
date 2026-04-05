@@ -25,7 +25,7 @@ func main() {
 
 	promptHandler := handler.NewPromptHandler(engineClient)
 	mux := http.NewServeMux()
-	mux.Handle("/prompt", middleware.Audit(promptHandler))
+	mux.Handle("/prompt", middleware.Auth(middleware.Audit(promptHandler)))
 
 	log.Println("Imprimer gateway listening on :8080")
 	log.Fatal(http.ListenAndServe(":8080", mux))
