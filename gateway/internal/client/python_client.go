@@ -3,7 +3,7 @@ package client
 import (
 	"context"
 
-	gen "github.com/BalorLC3/imprimer/gateway/gen"
+	gen "github.com/BalorLC3/Imprimer/gateway/gen"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
