@@ -21,6 +21,9 @@ data/
 
 # Go
 gateway/gen/
+gateway/gen/
+engine/imprimer_pb2.py
+engine/imprimer_pb2_grpc.py
 *.exe
 
 # Editor
