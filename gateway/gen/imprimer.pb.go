@@ -29,6 +29,7 @@ type EvaluateRequest struct {
 	Input         string                 `protobuf:"bytes,3,opt,name=input,proto3" json:"input,omitempty"`                       // actual quest
 	VariantA      string                 `protobuf:"bytes,4,opt,name=variant_a,json=variantA,proto3" json:"variant_a,omitempty"` // 1st prompt template to test
 	VariantB      string                 `protobuf:"bytes,5,opt,name=variant_b,json=variantB,proto3" json:"variant_b,omitempty"` // 2nd prompt template to test
+	Backend       string                 `protobuf:"bytes,6,opt,name=backend,proto3" json:"backend,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -94,6 +95,13 @@ func (x *EvaluateRequest) GetVariantA() string {
 func (x *EvaluateRequest) GetVariantB() string {
 	if x != nil {
 		return x.VariantB
+	}
+	return ""
+}
+
+func (x *EvaluateRequest) GetBackend() string {
+	if x != nil {
+		return x.Backend
 	}
 	return ""
 }
@@ -203,13 +211,14 @@ var File_imprimer_proto protoreflect.FileDescriptor
 
 const file_imprimer_proto_rawDesc = "" +
 	"\n" +
-	"\x0eimprimer.proto\x12\bimprimer\"\x90\x01\n" +
+	"\x0eimprimer.proto\x12\bimprimer\"\xaa\x01\n" +
 	"\x0fEvaluateRequest\x12\x19\n" +
 	"\btrace_id\x18\x01 \x01(\tR\atraceId\x12\x12\n" +
 	"\x04task\x18\x02 \x01(\tR\x04task\x12\x14\n" +
 	"\x05input\x18\x03 \x01(\tR\x05input\x12\x1b\n" +
 	"\tvariant_a\x18\x04 \x01(\tR\bvariantA\x12\x1b\n" +
-	"\tvariant_b\x18\x05 \x01(\tR\bvariantB\"\xe7\x01\n" +
+	"\tvariant_b\x18\x05 \x01(\tR\bvariantB\x12\x18\n" +
+	"\abackend\x18\x06 \x01(\tR\abackend\"\xe7\x01\n" +
 	"\x10EvaluateResponse\x12\x19\n" +
 	"\btrace_id\x18\x01 \x01(\tR\atraceId\x12\x16\n" +
 	"\x06winner\x18\x02 \x01(\tR\x06winner\x12\x19\n" +

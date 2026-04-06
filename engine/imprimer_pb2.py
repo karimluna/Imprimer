@@ -24,18 +24,18 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0eimprimer.proto\x12\x08imprimer\"f\n\x0f\x45valuateRequest\x12\x10\n\x08trace_id\x18\x01 \x01(\t\x12\x0c\n\x04task\x18\x02 \x01(\t\x12\r\n\x05input\x18\x03 \x01(\t\x12\x11\n\tvariant_a\x18\x04 \x01(\t\x12\x11\n\tvariant_b\x18\x05 \x01(\t\"\xa0\x01\n\x10\x45valuateResponse\x12\x10\n\x08trace_id\x18\x01 \x01(\t\x12\x0e\n\x06winner\x18\x02 \x01(\t\x12\x10\n\x08output_a\x18\x03 \x01(\t\x12\x10\n\x08output_b\x18\x04 \x01(\t\x12\x11\n\tlatency_a\x18\x05 \x01(\x02\x12\x11\n\tlatency_b\x18\x06 \x01(\x02\x12\x0f\n\x07score_a\x18\x07 \x01(\x02\x12\x0f\n\x07score_b\x18\x08 \x01(\x02\x32W\n\x0cPromptEngine\x12G\n\x0e\x45valuatePrompt\x12\x19.imprimer.EvaluateRequest\x1a\x1a.imprimer.EvaluateResponseB&Z$github.com/BalorLC3/Imprimer/gatewayb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0eimprimer.proto\x12\x08imprimer\"w\n\x0f\x45valuateRequest\x12\x10\n\x08trace_id\x18\x01 \x01(\t\x12\x0c\n\x04task\x18\x02 \x01(\t\x12\r\n\x05input\x18\x03 \x01(\t\x12\x11\n\tvariant_a\x18\x04 \x01(\t\x12\x11\n\tvariant_b\x18\x05 \x01(\t\x12\x0f\n\x07\x62\x61\x63kend\x18\x06 \x01(\t\"\xa0\x01\n\x10\x45valuateResponse\x12\x10\n\x08trace_id\x18\x01 \x01(\t\x12\x0e\n\x06winner\x18\x02 \x01(\t\x12\x10\n\x08output_a\x18\x03 \x01(\t\x12\x10\n\x08output_b\x18\x04 \x01(\t\x12\x11\n\tlatency_a\x18\x05 \x01(\x02\x12\x11\n\tlatency_b\x18\x06 \x01(\x02\x12\x0f\n\x07score_a\x18\x07 \x01(\x02\x12\x0f\n\x07score_b\x18\x08 \x01(\x02\x32W\n\x0cPromptEngine\x12G\n\x0e\x45valuatePrompt\x12\x19.imprimer.EvaluateRequest\x1a\x1a.imprimer.EvaluateResponseB*Z(github.com/BalorLC3/Imprimer/gateway/genb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'imprimer_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   _globals['DESCRIPTOR']._loaded_options = None
-  _globals['DESCRIPTOR']._serialized_options = b'Z$github.com/BalorLC3/Imprimer/gateway'
+  _globals['DESCRIPTOR']._serialized_options = b'Z(github.com/BalorLC3/Imprimer/gateway/gen'
   _globals['_EVALUATEREQUEST']._serialized_start=28
-  _globals['_EVALUATEREQUEST']._serialized_end=130
-  _globals['_EVALUATERESPONSE']._serialized_start=133
-  _globals['_EVALUATERESPONSE']._serialized_end=293
-  _globals['_PROMPTENGINE']._serialized_start=295
-  _globals['_PROMPTENGINE']._serialized_end=382
+  _globals['_EVALUATEREQUEST']._serialized_end=147
+  _globals['_EVALUATERESPONSE']._serialized_start=150
+  _globals['_EVALUATERESPONSE']._serialized_end=310
+  _globals['_PROMPTENGINE']._serialized_start=312
+  _globals['_PROMPTENGINE']._serialized_end=399
 # @@protoc_insertion_point(module_scope)

@@ -14,7 +14,8 @@ message EvaluateRequest{
     string task       = 2; // e.g. "summarize", "classify", "extract"
     string input      = 3; // actual quest
     string variant_a  = 4; // 1st prompt template to test
-    string variant_b   = 5; // 2nd prompt template to test
+    string variant_b  = 5; // 2nd prompt template to test
+    string backend    = 6;
 }
 
 // Python -> Go
@@ -25,8 +26,8 @@ message EvaluateResponse{
     string output_b     = 4; // "" for B
     float  latency_a    = 5; // How long variant A took
     float  latency_b    = 6; // "" variant B took
-    float score_a       = 7; // quality score for A
-    float score_b       = 8; // "" for B
+    float  score_a      = 7; // quality score for A
+    float  score_b      = 8; // "" for B
 }
 
 
