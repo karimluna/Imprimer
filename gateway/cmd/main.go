@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/BalorLC3/Imprimer/gateway/internal/client"
 	"github.com/BalorLC3/Imprimer/gateway/internal/handler"
@@ -16,17 +17,23 @@ import (
 // It only knows how to receive, authenticate, audit, and forward.
 
 func main() {
-	// Connect to Python gRPC server
-	engineClient, err := client.NewPythonClient("localhost:50051")
+	// Read engine address from environment.
+	engineAddr := os.Getenv("ENGINE_ADDR")
+	if engineAddr == "" {
+		engineAddr = "localhost:50051"
+	}
+
+	engineClient, err := client.NewPythonClient(engineAddr)
 	if err != nil {
-		log.Fatalf("failed to connect to engine: %v", err)
+		log.Fatalf("failed to connect to Python engine at %s: %v", engineAddr, err)
 	}
 	defer engineClient.Close()
 
 	promptHandler := handler.NewPromptHandler(engineClient)
+
 	mux := http.NewServeMux()
 	mux.Handle("/prompt", middleware.Auth(middleware.Audit(promptHandler)))
 
-	log.Println("Imprimer gateway listening on :8080")
+	log.Printf("Imprimer gateway listening on :8080 (engine at %s)", engineAddr)
 	log.Fatal(http.ListenAndServe(":8080", mux))
 }

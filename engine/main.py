@@ -28,7 +28,7 @@ class PromptEngineServicer(imprimer_pb2_grpc.PromptEngineServicer):
             f"backend={request.backend}"
         )
 
-        # Security gate — scan before any LLM interaction
+        # Security gate, scan before any LLM interaction
         try:
             scan_request(
                 trace_id=request.trace_id,
@@ -70,7 +70,7 @@ class PromptEngineServicer(imprimer_pb2_grpc.PromptEngineServicer):
         score_b = score(result_b)
         winner = "a" if score_a.combined >= score_b.combined else "b"
 
-        # Option C — reachability gap report
+        # reachability gap report
         gap_report = reachability_gap_report(
             trace_id=request.trace_id,
             reachability_a=score_a.reachability,
@@ -78,7 +78,7 @@ class PromptEngineServicer(imprimer_pb2_grpc.PromptEngineServicer):
             winner=winner,
         )
 
-        # Option B — persist to registry
+        # persist to registry
         save(EvalRecord(
             trace_id=request.trace_id,
             task=request.task,

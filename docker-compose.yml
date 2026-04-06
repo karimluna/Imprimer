@@ -2,8 +2,10 @@ services:
 
   engine:
     build:
-      context: ../engine
+      context: ./engine
       dockerfile: Dockerfile
+      additional_contexts:
+        proto: ./proto
     ports:
       - "50051:50051"
     environment:
@@ -20,20 +22,22 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
-
+  
   gateway:
-    build:
-      context: ../gateway
-      dockerfile: Dockerfile
-    ports:
-      - "8080:8080"
-    environment:
-      - ENGINE_ADDR=engine:50051
-      - IMPRIMER_API_KEY=${IMPRIMER_API_KEY:-}
-    depends_on:
-      engine:
-        condition: service_healthy
-    restart: unless-stopped
+      build:
+        context: .
+        dockerfile: gateway/Dockerfile
+        additional_contexts:
+          proto: ./proto
+      ports:
+        - "8080:8080"
+      environment:
+        - ENGINE_ADDR=engine:50051
+        - IMPRIMER_API_KEY=${IMPRIMER_API_KEY:-}
+      depends_on:
+        engine:
+          condition: service_healthy
+      restart: unless-stopped
 
 volumes:
   engine_data:
