@@ -43,3 +43,4 @@ dist-ssr
 *.env
 
 IMPRIMER.md
+*.db
