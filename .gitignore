@@ -1,46 +1,40 @@
-# Byte-compiled / optimized / DLL files
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
-
-# pytest
+*.egg-info/
 .pytest_cache/
 .coverage
 htmlcov/
-.tox/
-.nox/
-ipynb_checkpoints
-.vscode
-.cache
-data/processed/*
-data/raw/*
+
+# Environment — never commit real keys
+.env
+*.env.local
+
 # Logs
-logs
+logs/
 *.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
-*.local
+# Database — runtime data, not source
+*.db
+data/
 
-# Editor directories and files
+# Go
+gateway/gen/
+*.exe
+
+# Editor
 .vscode/*
 !.vscode/extensions.json
-.idea
+.idea/
 .DS_Store
 *.suo
-*.ntvs*
-*.njsproj
-*.sln
 *.sw?
-*.egg-info
-*.env.example
-*.env
+
+# Node (if frontend is added later)
+node_modules/
+dist/
+
+
 
 IMPRIMER.md
-*.db
