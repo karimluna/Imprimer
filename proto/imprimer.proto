@@ -6,6 +6,7 @@ option go_package = "github.com/BalorLC3/Imprimer/gateway/gen";
 
 service PromptEngine { // Go calls into Python for this service
     rpc EvaluatePrompt(EvaluateRequest) returns (EvaluateResponse);
+    rpc BestVariant(BestRequest) returns (BestResponse);
 };
 
 // From Go -> Python
@@ -30,4 +31,17 @@ message EvaluateResponse{
     float  score_b      = 8; // "" for B
 }
 
+// This RPC will make the system learn the best prompt
+message BestRequest {
+  string task  = 1;
+  int32  limit = 2;
+}
 
+message BestResponse {
+  string task             = 1;
+  string best_template    = 2;
+  float  avg_reachability = 3;
+  float  avg_score        = 4;
+  int32  evaluations      = 5;
+  bool   found            = 6;
+}

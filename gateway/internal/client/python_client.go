@@ -34,3 +34,7 @@ func (c *PythonClient) Call(ctx context.Context, req *gen.EvaluateRequest) (*gen
 func (c *PythonClient) Close() error {
 	return c.conn.Close()
 }
+
+func (c *PythonClient) Best(ctx context.Context, req *gen.BestRequest) (*gen.BestResponse, error) {
+	return c.stub.BestVariant(ctx, req)
+}

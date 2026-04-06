@@ -11,7 +11,8 @@ import imprimer_pb2_grpc
 
 from core.chains.prompt_chain import run_variant, ModelBackend
 from core.evaluator.scorer import score
-from core.registry.prompt_store import init_db, save, EvalRecord
+from core.registry.prompt_store import init_db, save, EvalRecord, best_variant_for_task
+
 from observability.tracer import log_eval, EvalTrace, reachability_gap_report
 from security.injection_guard import scan_request, InjectionDetected
 from utils.create_logger import get_logger
@@ -128,6 +129,27 @@ class PromptEngineServicer(imprimer_pb2_grpc.PromptEngineServicer):
             latency_b=result_b.latency_ms,
             score_a=score_a.combined,
             score_b=score_b.combined,
+        )
+    
+    def BestVariant(self, request, context):
+        logger.info(f"task={request.task} limit={request.limit}")
+        
+        limit = request.limit if request.limit > 0 else 10
+        result = best_variant_for_task(request.task, limit=limit)
+
+        if not result:
+            return imprimer_pb2.BestResponse(
+                task=request.task,
+                found=False
+            )
+        
+        return imprimer_pb2.BestResponse(
+            task=result["task"],
+            best_template=result["best_template"],
+            avg_reachability=result["avg_reachability"],
+            avg_score=result["avg_score"],
+            evaluations=result["evaluations_sampled"],
+            found=True,
         )
 
 
