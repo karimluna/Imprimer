@@ -102,7 +102,6 @@ def score(result: VariantResult) -> Score:
 
     # Weights: reachability 50%, latency 20%, length 30%
     # Reachability is weighted highest because it is the metric
-    # that distinguishes Imprimer from every other A/B prompt tool.
     combined = (
         0.50 * reachability +
         0.20 * latency_score +

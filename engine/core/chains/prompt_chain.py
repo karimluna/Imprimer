@@ -148,7 +148,7 @@ def run_variant(
         template=template,
         input_variables=["task", "input"]
     )
-
+    
     # Render the prompt template to a plain string for Ollama
     # (Ollama's /api/generate expects a string, not a message list)
     rendered = prompt.format(task=task, input=input_text)
