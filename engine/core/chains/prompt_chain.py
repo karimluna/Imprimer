@@ -109,7 +109,7 @@ def _run_ollama(prompt_text: str) -> VariantResult:
     # Text lives under message.content in /api/chat
     text = data.get("message", {}).get("content", "")
 
-    # Logprobs are at the top level — confirmed from Ollama v0.19 response
+    # Logprobs are at the top level 
     raw = data.get("logprobs") or []
     logprobs = [
         {
