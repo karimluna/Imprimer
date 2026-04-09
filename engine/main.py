@@ -165,12 +165,14 @@ class PromptEngineServicer(imprimer_pb2_grpc.PromptEngineServicer):
         try:
             backend = ModelBackend(backend_str)
         except ValueError:
+            # Fallback to Ollama
             logger.warning(
                 f"trace={request.trace_id} "
                 f"unknown backend '{backend_str}', falling back to ollama"
             )
             backend = ModelBackend.OLLAMA
 
+        # Go already raises BadRequest if n_trials is not greater than zero but just in case
         n_trials = request.n_trials if request.n_trials > 0 else 20
 
         result = optimize(
