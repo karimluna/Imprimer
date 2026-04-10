@@ -33,9 +33,12 @@ jobs:
             --go_opt=paths=source_relative \
             --go-grpc_opt=paths=source_relative \
             proto/imprimer.proto
+      
+      - name: Build gateway binary
+        run: go build -o imprimer-gateway ./gateway/cmd/
 
-      - name: Build
-        run: go build ./gateway/...
+      - name: Build CLI
+        run: go build -o imprimer-gateway ./gateway/cmd/imprimer/
 
       - name: Vet
         run: go vet ./gateway/...

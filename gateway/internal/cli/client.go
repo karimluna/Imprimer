@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 )
@@ -28,9 +29,8 @@ func NewImprimerClient(baseURL, apiKey string) *ImprimerClient {
 	}
 }
 
-// Inspired from guides in https://github.com/spf13/cobra?tab=readme-ov-file
 func (c *ImprimerClient) post(path string, body any, out any) error {
-	payload, err := json.Marshal(body)
+	payload, err := json.Marshal(body) // convert struct to json-encoded byte slice
 	if err != nil {
 		return fmt.Errorf("marshal request: %w", err)
 	}
@@ -49,5 +49,36 @@ func (c *ImprimerClient) post(path string, body any, out any) error {
 	if err != nil {
 		return fmt.Errorf("request failed : %w", err)
 	}
+	defer resp.Body.Close() // remember LIFO
+
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("gateway returned %d: %s", resp.StatusCode, string(raw))
+	}
+
+	return json.Unmarshal(raw, out)
+}
+
+func (c *ImprimerClient) get(path string, out any) error {
+	req, err := http.NewRequest(http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
+	}
+
+	if c.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
+	}
 	defer resp.Body.Close()
+
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("gateway returned %d: %s", resp.StatusCode, string(raw))
+	}
+
+	return json.Unmarshal(raw, out)
 }
