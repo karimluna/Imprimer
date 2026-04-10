@@ -16,6 +16,7 @@ type promptRequest struct {
 	Input    string `json:"input"`
 	VariantA string `json:"variant_a"`
 	VariantB string `json:"variant_b"`
+	Backend  string `json:"backend"`
 }
 
 // promptResponse is what Imprimer returns, winner and evidence
@@ -59,12 +60,17 @@ func (h *PromptHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Pull trace ID the Audit middleware already placed in the context
 	traceID := middleware.TraceIDFrom(r.Context())
 
+	if req.Backend == "" {
+		req.Backend = "ollama"
+	}
+
 	grpcReq := &gen.EvaluateRequest{
 		TraceId:  traceID,
 		Task:     req.Task,
 		Input:    req.Input,
 		VariantA: req.VariantA,
 		VariantB: req.VariantB,
+		Backend:  req.Backend,
 	}
 
 	grpcResp, err := h.engine.Call(r.Context(), grpcReq)
