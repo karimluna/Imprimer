@@ -17,6 +17,7 @@ type promptRequest struct {
 	VariantA string `json:"variant_a"`
 	VariantB string `json:"variant_b"`
 	Backend  string `json:"backend"`
+	UseJudge bool   `json:"use_judge"`
 }
 
 // promptResponse is what Imprimer returns, winner and evidence
@@ -71,6 +72,7 @@ func (h *PromptHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		VariantA: req.VariantA,
 		VariantB: req.VariantB,
 		Backend:  req.Backend,
+		UseJudge: req.UseJudge,
 	}
 
 	grpcResp, err := h.engine.Call(r.Context(), grpcReq)

@@ -68,8 +68,8 @@ class PromptEngineServicer(imprimer_pb2_grpc.PromptEngineServicer):
             backend=backend,
         )
 
-        score_a = score(result_a)
-        score_b = score(result_b)
+        score_a = score(result_a, request.task, request.input, request.use_judge, backend) # Scorer have optional use_judge
+        score_b = score(result_b, request.task, request.input, request.use_judge, backend)
         winner = "a" if score_a.combined >= score_b.combined else "b"
 
         # reachability gap report

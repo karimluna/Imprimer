@@ -25,6 +25,7 @@ type optimizeRequest struct {
 	ExpectedOutput string `json:"expected_output"`
 	NTrials        int32  `json:"n_trials"`
 	Backend        string `json:"backend"` // "ollama" or "openai"
+	UseJudge       bool   `json:"use_judge"`
 }
 
 type optimizeResponse struct {
@@ -69,6 +70,7 @@ func (h *OptimizeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ExpectedOutput: req.ExpectedOutput,
 		NTrials:        req.NTrials,
 		Backend:        req.Backend,
+		UseJudge:       req.UseJudge,
 	})
 	if err != nil {
 		http.Error(w, "engine error: "+err.Error(), http.StatusInternalServerError)

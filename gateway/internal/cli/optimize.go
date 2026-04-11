@@ -14,6 +14,7 @@ type optimizePayload struct {
 	ExpectedOutput string `json:"expected_output"`
 	NTrials        int32  `json:"n_trials"`
 	Backend        string `json:"backend"`
+	UseJudge       bool   `json:"use_judge"`
 }
 
 type optimizeResult struct {
@@ -47,6 +48,7 @@ typically converges within 8-10 trials after the initial random exploration.`,
 		expected, _ := cmd.Flags().GetString("expected")
 		trials, _ := cmd.Flags().GetInt32("trials")
 		backend, _ := cmd.Flags().GetString("backend")
+		useJudge, _ := cmd.Flags().GetBool("judge")
 
 		if task == "" || prompt == "" || input == "" || expected == "" {
 			return fmt.Errorf("--task, --prompt, --input, and --expected are all required")
@@ -68,6 +70,7 @@ typically converges within 8-10 trials after the initial random exploration.`,
 			ExpectedOutput: expected,
 			NTrials:        trials,
 			Backend:        backend,
+			UseJudge:       useJudge,
 		}, &result); err != nil {
 			return err
 		}
