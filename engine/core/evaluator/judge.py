@@ -12,25 +12,30 @@ from utils.create_logger import get_logger
 
 logger = get_logger(__name__)
 
-JUDGE_PROMPT = """You are an impartial evaluator. Score the following AI output.
+JUDGE_PROMPT = """You are an impartial evaluator. Score the output exactly as JSON.
 
 Task type: {task}
 Input given to the AI: {input}
 AI output to evaluate: {output}
 
-Score the output on these three dimensions from 0.0 to 1.0:
-- accuracy: does the output correctly address the input for this task?
-- completeness: does it cover what the task requires without missing key points?
-- conciseness: does it avoid unnecessary words, repetition, or padding?
+Score the output on these dimensions from 0.0 to 1.0:
+- accuracy
+- completeness
+- conciseness
 
 Rules:
-- 1.0 means perfect, 0.0 means completely wrong or missing
-- Be strict but fair
-- Respond with ONLY a valid JSON object, nothing else
+- Return ONLY a single JSON object.
+- Do not add any prose, explanation, or markdown.
+- Use numeric values only.
+- Use exactly one digit after the decimal or 0/1.
+- If you cannot evaluate, return 0.0 for all fields.
+
+Example:
+{{"accuracy": 0.8, "completeness": 0.7, "conciseness": 0.9}}
 
 Your response:
-{{"accuracy": <score>, "completeness": <score>, "conciseness": <score>}}"""
-
+{{"accuracy": <score>, "completeness": <score>, "conciseness": <score>}}
+""" # For debug add "reasoning": <brief explanation of the score, optional>
 
 def _cache_key(task: str, input_text: str, output: str) -> str:
     raw = f"{task}||{input_text}||{output}"
@@ -51,7 +56,12 @@ def _parse_scores(text: str) -> dict:
     try:
         match = re.search(r'\{[^}]+\}', cleaned, re.DOTALL)
         if match:
-            return json.loads(match.group())
+            data = json.loads(match.group())
+            return { 
+                "accuracy": data.get("accuracy", 0.5),
+                "completeness": data.get("completeness", 0.5),
+                "conciseness": data.get("conciseness", 0.5),
+            }
     except (json.JSONDecodeError, AttributeError):
         pass
 
@@ -74,7 +84,7 @@ def _run_judge_ollama(prompt_text: str) -> str:
         "messages": [{"role": "user", "content": prompt_text}],
         "stream": False,
         "options": {
-            "temperature": 0,
+            "temperature": 0.1, # https://arxiv.org/html/2603.28304v1
         }
     }
 
