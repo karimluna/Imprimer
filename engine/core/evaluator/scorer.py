@@ -1,6 +1,6 @@
 import math
 from dataclasses import dataclass
-from core.chains.prompt_chain import VariantResult
+from core.chains.prompt_chain import VariantResult, ModelBackend
 
 @dataclass
 class Score:
@@ -74,7 +74,13 @@ def _compute_reachability(logprobs: list) -> float:
     return round(sum(token_certainties) / len(token_certainties), 4)
 
 
-def score(result: VariantResult) -> Score:
+def score(
+        result: VariantResult,
+        task: str = "",
+        input_text: str = "",
+        use_judge: bool = False,
+        backend: ModelBackend = ModelBackend.OLLAMA
+    ) -> Score:
     """
     Scores a variant result on three dimensions:
 
@@ -91,26 +97,38 @@ def score(result: VariantResult) -> Score:
     Imprimer's core thesis - prompt control, not just prompt speed.
     """
     reachability = _compute_reachability(result.logprobs)
-
     latency_score = max(0.0, 1.0 - (result.latency_ms / LATENCY_BUDGET_MS))
 
-    length_ratio = len(result.text) / TARGET_LENGTH
-    if length_ratio < 1.0:
-        length_score = length_ratio
+    if use_judge and task and input_text:
+        # Quality signal, one extra LLM call
+        from core.evaluator.judge import judge
+        quality_score = judge(
+            task=task,
+            input_text=input_text,
+            output=result.text,
+            backend=backend
+        )
+        # Weights shift when judge is available
+        combined = (
+            0.40 * reachability +
+            0.35 * quality_score +
+            0.25 * latency_score
+        )
     else:
-        length_score = 1.0 / length_ratio
+        # Fallback is no extra LLM call
+        length_ratio = len(result.text) / TARGET_LENGTH
+        length_score = length_ratio if length_ratio < 1.0 else 1.0 / length_ratio
+        quality_score = length_score
 
-    # Weights: reachability 50%, latency 20%, length 30%
-    # Reachability is weighted highest because it is the metric
-    combined = (
-        0.50 * reachability +
-        0.20 * latency_score +
-        0.30 * length_score
-    )
-
+        combined = (
+            0.50 * reachability +
+            0.20 * latency_score +
+            0.30 * quality_score
+        )
+    
     return Score(
         reachability=reachability,
         latency_score=round(latency_score, 3),
-        length_score=round(length_score, 3),
+        length_score=round(quality_score, 3),
         combined=round(combined, 3),
     )

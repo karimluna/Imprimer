@@ -102,6 +102,7 @@ func init() {
 	optimizeCmd.Flags().String("expected", "", "Expected output for similarity scoring")
 	optimizeCmd.Flags().Int32("trials", 20, "Number of optimization trials")
 	optimizeCmd.Flags().String("backend", "ollama", "Model backend: ollama or openai")
+	optimizeCmd.Flags().Bool("judge", false, "Enable LLM-as-judge scoring during optimization")
 
 	RootCmd.AddCommand(optimizeCmd)
 }
