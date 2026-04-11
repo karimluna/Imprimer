@@ -11,6 +11,7 @@ from langchain_core.prompts import PromptTemplate
 class ModelBackend(Enum):
     OPENAI = "openai"
     OLLAMA = "ollama"
+    # Include more later
 
 
 @dataclass

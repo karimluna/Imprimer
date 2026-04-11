@@ -2,13 +2,13 @@ import math
 from dataclasses import dataclass
 from core.chains.prompt_chain import VariantResult
 
-
 @dataclass
 class Score:
-    reachability: float   # controllability index from the paper 0.0 to 1.0
-    latency_score: float  # 0.0 to 1.0, higher is faster
-    length_score: float   # penalizes too short or too long
-    combined: float       # weighted combination of all three
+    reachability: float         # controllability index from the paper 0.0 to 1.0
+    latency_score: float        # 0.0 to 1.0, higher is faster
+    length_score: float | None  # penalizes too short or too long
+    judge_score: float | None   # LLM-as-judge score, it works is to critic the output of another LLM only needed if LLM-as-judge is enabled
+    combined: float             # weighted combination of all three
 
 
 # From Bhargava et al. prompts of <=10 tokens steer the correct next
