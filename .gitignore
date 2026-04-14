@@ -39,5 +39,7 @@ node_modules/
 dist/
 
 
-
+# Docs
 IMPRIMER.md
+docs/assets/architecture.drawio.png
+docs/architecture.md
