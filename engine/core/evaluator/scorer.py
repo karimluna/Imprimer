@@ -12,10 +12,7 @@ class Score:
 
 
 # From Bhargava et al. prompts of <=10 tokens steer the correct next
-# token into the reachable set 97% of the time. We use this as our
-# baseline: a reachability index of 0.97 means the prompt is controlling
-# the model as well as the paper's theoretical upper bound predicts.
-PAPER_REACHABILITY_BASELINE = 0.97
+# token into the reachable set 97% of the time.
 
 # Latency budget: anything under this scores 1.0, degrades linearly after
 LATENCY_BUDGET_MS = 1000.0
@@ -72,13 +69,10 @@ def score(
     Scores a variant result on three dimensions:
 
     1. Reachability - did the prompt strongly control the output distribution?
-       Grounded in the control theory paper. Requires logprobs.
 
     2. Latency - did the model respond within the budget?
-       Manufacturing context: latency has real cost at the edge.
 
     3. Length - did the response match the expected scope?
-       Proxy for whether the prompt elicited the right level of detail.
 
     The combined score weights reachability most heavily because that is
     Imprimer's core thesis - prompt control, not just prompt speed.
@@ -95,12 +89,11 @@ def score(
             output=result.text,
             backend=backend
         )
-        # Weights shift when judge is available
+        # if judge is enabled, we are mostly interested in not to waste the API call
         combined = (
-            0.40 * reachability +
-            0.35 * quality_score +
-            0.25 * latency_score
-        )
+            0.80 * quality_score +
+            0.20 * reachability
+            )
     else:
         # Fallback is no extra LLM call
         length_ratio = len(result.text) / TARGET_LENGTH

@@ -1,5 +1,5 @@
 """
-LangGraph optimization graph —> the outer control loop.
+LangGraph optimization graph -> the outer control loop.
 This is the top-level entry point for prompt optimization.
 
 Graph structure:
