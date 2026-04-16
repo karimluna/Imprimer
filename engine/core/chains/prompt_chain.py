@@ -60,22 +60,6 @@ def _run_ollama(prompt_text: str) -> VariantResult:
     """
     Calls Ollama /api/chat with logprobs enabled.
     
-    Ollama v0.12.11+ returns logprobs at the top level of the response:
-    {
-      "message": {"content": "..."},
-      "logprobs": [
-        {
-          "token": "Hello",
-          "logprob": -0.277,
-          "top_logprobs": [
-            {"token": "Hello", "logprob": -0.277},
-            {"token": "Hi",    "logprob": -1.455},
-            ...
-          ]
-        },
-        ...
-      ]
-    }
     We normalize this into the same shape as the OpenAI extractor
     so the scorer receives identical input regardless of backend.
     """

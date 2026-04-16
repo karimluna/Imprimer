@@ -92,7 +92,7 @@ def optimize(
         template=base_prompt,
         input_text=input_example,
         task=task,
-        backend=backend_str
+        backend=backend,
     )
 
     baseline_score_obj = compute_score(baseline_result)
@@ -133,11 +133,13 @@ def optimize(
         final_state["best_score"] - baseline_score, 4
     )
 
+    iterations_completed = final_state.get("current_iteration", 0)
+    
     logger.info(
         f"graph complete "
-        f"iterations={final_state['iterations_completed']} "
+        f"iterations={iterations_completed} "
         f"best_reachability={final_state['best_reachability']:.4f} "
-        f"target_reached={final_state['target_reached']} "
+        f"target_reached={final_state.get('target_reached', False)} "
         f"improvement={improvement:+.4f}"
     )
 
@@ -149,6 +151,6 @@ def optimize(
         "baseline_reachability": baseline_reachability,
         "improvement": improvement,
         "trials_run": len(final_state["history"]),
-        "iterations_completed": final_state["iterations_completed"],
-        "target_reached": final_state["target_reached"],
+        "iterations_completed": iterations_completed,
+        "target_reached": final_state.get("target_reached", False),
     }

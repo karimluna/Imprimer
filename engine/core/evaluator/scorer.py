@@ -7,7 +7,7 @@ class Score:
     reachability: float         # controllability index from the paper 0.0 to 1.0
     latency_score: float        # 0.0 to 1.0, higher is faster
     length_score: float | None  # penalizes too short or too long
-    judge_score: float | None   # LLM-as-judge score, it works is to critic the output of another LLM only needed if LLM-as-judge is enabled
+    # judge_score: float | None   # LLM-as-judge score, it works is to critic the output of another LLM only needed if LLM-as-judge is enabled
     combined: float             # weighted combination of all three
 
 
