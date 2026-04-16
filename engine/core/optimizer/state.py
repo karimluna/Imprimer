@@ -13,7 +13,8 @@ class PromptState(TypedDict):
     expected_output: str
     backend: str
     use_judge: bool
-
+    base_prompt: str
+    
     # Control parameters
     target_reachability: float  # stop when?
     max_iterations: int         # hard cap on graph cycles
