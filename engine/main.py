@@ -12,8 +12,9 @@ import imprimer_pb2_grpc
 from core.chains.prompt_chain import run_variant, ModelBackend
 from core.evaluator.scorer import score
 from core.registry.prompt_store import init_db, save, EvalRecord, best_variant_for_task
-from core.optimizer.bayesian_search import optimize
 from core.optimizer.graph import optimize as graph_optimize
+from core.analyzer.stability import analyze as run_stability
+
 
 from observability.tracer import log_eval, EvalTrace, reachability_gap_report
 from security.injection_guard import scan_request, InjectionDetected
@@ -199,7 +200,48 @@ class PromptEngineServicer(imprimer_pb2_grpc.PromptEngineServicer):
             iterations_completed=result["iterations_completed"],
             target_reached=result["target_reached"],
         )
-            
+    
+    def AnalyzeStability(self, request, context):
+        logger.info(
+            f"trace={request.trace_id} "
+            f"task={request.task} "
+            f"n_runs={request.n_runs} "
+            f"temperature={request.temperature}"
+        )
+
+        backend_str = request.backend.lower() if request.backend else "ollama"
+        try: 
+            backend = ModelBackend(backend_str)
+        except ValueError:
+            backend = ModelBackend.OLLAMA
+
+        result = run_stability(
+            prompt=request.prompt,
+            input_text=request.input,
+            task=request.task,
+            backend=backend,
+            n_runs=request.n_runs if request.n_runs > 0 else 5,
+            temperature=request.temperature if request.temperature > 0 else 0.7,
+        )
+
+        token_confidence = [
+            imprimer_pb2.TokenConfidence(
+                token=tc.token,
+                logprob=tc.logprob,
+                certainty=tc.certainty,
+            )
+            for tc in result.token_confidence
+        ]
+
+        return imprimer_pb2.StabilityResponse(
+            trace_id=request.trace_id,
+            outputs=result.outputs,
+            avg_reachability=result.avg_reachability,
+            variance=result.variance,
+            avg_similarity=result.avg_similarity,
+            stability_score=result.stability_score,
+            token_confidence=token_confidence,
+        )
 
 
 def serve():
