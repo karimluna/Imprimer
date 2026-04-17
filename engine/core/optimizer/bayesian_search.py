@@ -436,8 +436,6 @@ def optimize(
         sim = s.similarity
         combined = s.combined
 
-
-
         mut_label = (
             f"dim={dimension}"
             f"|key={mutation_key}"
