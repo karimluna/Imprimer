@@ -43,3 +43,10 @@ dist/
 docs/assets/architecture.drawio.png
 docs/architecture.md
 docs/roadmap.md
+
+
+# Hugging Face cache
+huggingface/
+sentence_transformers/
+*.bin 
+*.safetensors
