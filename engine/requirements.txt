@@ -10,3 +10,4 @@ requests>=2.32.0
 optuna>=4.2.0
 spacy>=3.8.14
 sentence-transformers>=5.4.1
+gradio>=6.12.0
