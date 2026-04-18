@@ -80,7 +80,7 @@ def _run_with_temperature(
         ]
         return text, logprobs
 
-    if backend == ModelBackend.OPENAI:
+    elif backend == ModelBackend.OPENAI:
         from langchain_openai import ChatOpenAI
         llm = ChatOpenAI(
             model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
@@ -110,8 +110,31 @@ def _run_with_temperature(
             pass
 
         return text, logprobs
+    
+    elif backend == ModelBackend.HUGGINGFACE:
+        from huggingface_hub import InferenceClient
+        
+        token = os.environ.get("HF_TOKEN")
+        model_id = os.environ.get("HF_MODEL_ID", "meta-llama/Meta-Llama-3-8B-Instruct")
+        client = InferenceClient(model=model_id, token=token)
 
-    raise ValueError(f"Unknown backend: {backend}")
+        formatted =  f"""### Instruction: 
+{prompt_text} 
+
+### Response:
+"""
+        text = client.text_generation(
+            formatted,
+            max_new_tokens=150,
+            temperature=0.3,
+            do_sample=True,
+        )
+
+        logprobs = [] # sadly there are no logprobs from inference hf
+        return text, logprobs
+
+    else:
+        raise ValueError(f"Unknown backend: {backend}")
 
 
 def _pairwise_similarity(outputs: list[str]) -> float:
@@ -134,14 +157,14 @@ def analyze(
     Recommended: 0.5-0.9 for meaningful stability measurement.
 
     The stability score combines three signals:
-      avg_reachability — how controlled is the output distribution?
-      avg_similarity   — how consistent are the actual outputs?
-      variance         — how much does reachability fluctuate across runs?
+      avg_reachability - how controlled is the output distribution?
+      avg_similarity   - how consistent are the actual outputs?
+      variance         - how much does reachability fluctuate across runs?
 
     A prompt with high stability is reliable in production.
     A prompt with low stability needs optimization before deployment.
     """
-    full_prompt = f"{prompt}\n\nInput: {input_text}" if input_text else prompt
+    full_prompt = f"Your task is {task}\n:{prompt}\n\nInput: {input_text}" if input_text else prompt
 
     outputs = []
     reachabilities = []
@@ -180,7 +203,7 @@ def analyze(
         4
     )
 
-    # Token confidence from first run — used for visualization
+    # Token confidence from first run - used for visualization
     token_confidence = []
     if all_logprobs:
         for entry in all_logprobs[0]:

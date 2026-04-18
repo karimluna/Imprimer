@@ -5,6 +5,7 @@ Three-panel interface: Input, Analysis and Optimization
 import os
 import sys
 
+# SSL workaround for certain environments
 ssl_cert_file = os.environ.get("SSL_CERT_FILE")
 if ssl_cert_file and not os.path.exists(ssl_cert_file):
     del os.environ["SSL_CERT_FILE"]
@@ -21,6 +22,20 @@ from core.optimizer.graph import optimize as run_optimize
 from core.registry.prompt_store import best_variant_for_task, init_db
 from core.chains.prompt_chain import ModelBackend
 
+
+# Standard task categories to keep the registry clean
+TASK_CATEGORIES = [
+    "summarize",
+    "classify",
+    "extract",
+    "translate",
+    "reasoning",
+    "creative_writing",
+    "code_generation",
+    "rewrite",
+    "roleplay",
+    "qa"
+]
 
 def _render_token_confidence(token_confidence: list) -> str:
     """
@@ -50,18 +65,34 @@ def _render_token_confidence(token_confidence: list) -> str:
     html += "</p>"
     return html
 
-
 def run_optimization(
-    prompt, input_text, task, backend,
+    prompt, input_text, task, hf_model_id, hf_token,
     expected_output, n_trials, target_reachability, max_iterations, use_judge
 ):
     if not prompt or not task or not expected_output:
-        return "Prompt, task, and expected output are required.", None, None
+        yield "Prompt, task, and expected output are required.", None, None
+        return
 
-    try:
-        backend_enum = ModelBackend(backend.lower()) if backend else ModelBackend.OLLAMA
-    except ValueError:
-        backend_enum = ModelBackend.OLLAMA
+    # Dynamically inject the UI variables into the environment for the backend
+    if hf_model_id:
+        os.environ["HF_MODEL_ID"] = hf_model_id
+    if hf_token:
+        os.environ["HF_TOKEN"] = hf_token
+
+
+    # Yield the initial state so the user sees the original prompt right away
+    initial_status = "⏳ **Optimization running...** (Evaluating variations, please wait)"
+    initial_prompt_comparison = f"""**Original:**
+{prompt}
+
+---
+
+**Optimized:**
+*⏳ Optimization in progress... This may take a few minutes.*
+"""
+    yield initial_status, None, initial_prompt_comparison
+
+    backend_enum = ModelBackend.HUGGINGFACE
 
     try:
         result = run_optimize(
@@ -70,14 +101,16 @@ def run_optimization(
             input_example=input_text,
             expected_output=expected_output,
             n_trials=int(n_trials),
-            backend=backend_enum,
+            backend=backend_enum,  # Pass the string value instead of enum
             use_judge=bool(use_judge),
             target_reachability=float(target_reachability),
             max_iterations=int(max_iterations),
         )
     except Exception as e:
-        return str(e), None, None
+        yield f"Optimization Error: {str(e)}", None, initial_prompt_comparison
+        return
 
+    # --- FINAL UI UPDATE ---
     status = "✅ Target reached" if result.get("target_reached") else "⏹ Iteration cap reached"
 
     comparison_md = f"""
@@ -91,7 +124,7 @@ def run_optimization(
 | Status | | {status} |
 """
 
-    prompt_comparison = f"""**Original:**
+    final_prompt_comparison = f"""**Original:**
 {prompt}
 
 ---
@@ -100,19 +133,22 @@ def run_optimization(
 {result['best_prompt']}
 """
 
-    return status, comparison_md, prompt_comparison
+    yield status, comparison_md, final_prompt_comparison
 
-def run_analysis(prompt, input_text, task, backend, n_runs, temperature):
+def run_analysis(prompt, input_text, task, hf_model_id, hf_token, n_runs, temperature):
     if not prompt or not task:
         return (
             "Prompt and task are required.",
             None, None, None, None, None
         )
 
-    try:
-        backend_enum = ModelBackend(backend.lower()) if backend else ModelBackend.OLLAMA
-    except ValueError:
-        backend_enum = ModelBackend.OLLAMA
+    # Dynamically inject the UI variables into the environment for the backend
+    if hf_model_id:
+        os.environ["HF_MODEL_ID"] = hf_model_id
+    if hf_token:
+        os.environ["HF_TOKEN"] = hf_token
+
+    backend_enum = ModelBackend.HUGGINGFACE
 
     try:
         result = run_stability(
@@ -124,7 +160,7 @@ def run_analysis(prompt, input_text, task, backend, n_runs, temperature):
             temperature=float(temperature),
         )
     except Exception as e:
-        return str(e), None, None, None, None, None
+        return f"Analysis Error: {str(e)}", None, None, None, None, None
 
     # Metrics table
     metrics_md = f"""
@@ -162,36 +198,6 @@ def run_analysis(prompt, input_text, task, backend, n_runs, temperature):
 
     return verdict, metrics_md, outputs_text, token_html, result, None
 
-
-def _render_token_confidence(token_confidence: list) -> str:
-    """
-    Renders token-level confidence as colored HTML spans.
-    High certainty → green, low certainty → red.
-    """
-    if not token_confidence:
-        return "<p>No token confidence data available.</p>"
-
-    html = "<p style='font-family: monospace; font-size: 14px; line-height: 2;'>"
-    for tc in token_confidence:
-        certainty = tc.get("certainty", 0.5)
-        # Map certainty to color: red (low) → yellow → green (high)
-        r = int(255 * (1 - certainty))
-        g = int(255 * certainty)
-        b = 0
-        color = f"rgb({r},{g},{b})"
-        bg = f"rgba({r},{g},{b},0.15)"
-        token = tc.get("token", "").replace("<", "&lt;").replace(">", "&gt;")
-        logprob = tc.get("logprob", 0)
-        html += (
-            f'<span title="certainty={certainty:.3f} logprob={logprob:.3f}" '
-            f'style="background:{bg};border-bottom:2px solid {color};'
-            f'padding:1px 2px;margin:1px;border-radius:2px;">'
-            f'{token}</span>'
-        )
-    html += "</p>"
-    return html
-
-
 def query_best(task, limit):
     if not task:
         return "Task is required."
@@ -208,22 +214,9 @@ def query_best(task, limit):
 """
     except Exception as e:
         return str(e)
-    
 
 # Gradio layout
-
-with gr.Blocks(
-    title="Imprimer - LLM Prompt Control",
-    theme=gr.themes.Soft(),
-    css="""
-    .metric-box { 
-        background: #f8f9fa; 
-        border-radius: 8px; 
-        padding: 12px; 
-        margin: 4px;
-    }
-    """
-) as demo:
+with gr.Blocks(title="Imprimer - LLM Prompt Control") as demo:
 
     gr.Markdown("""
 # Imprimer - LLM Prompt Control Platform
@@ -235,7 +228,6 @@ Grounded in *"What's the Magic Word? A Control Theory of LLM Prompting"* (Bharga
 and Minsky's *The Society of Mind* (1986).
 """)
 
-    # ── Shared input panel ────────────────────────────────────────────────────
     with gr.Row():
         with gr.Column(scale=1):
             gr.Markdown("### ⚙️ Setup")
@@ -249,16 +241,36 @@ and Minsky's *The Society of Mind* (1986).
                 placeholder="The text your prompt will process...",
                 lines=3,
             )
-            task_input = gr.Textbox(
+            
+            # The Task Input for the active run
+            task_input = gr.Dropdown(
                 label="Task type",
+                choices=TASK_CATEGORIES,
                 value="summarize",
-                placeholder="summarize, classify, extract...",
+                allow_custom_value=True,
+                info="Select a category or type a new one."
             )
-            backend_choice = gr.Radio(
-                choices=["ollama", "openai"],
-                value="ollama",
-                label="Backend",
-            )
+            
+            with gr.Row():
+                hf_model_id = gr.Dropdown(
+                    label="Hugging Face Model ID",
+                choices=[
+                    "HuggingFaceTB/SmolLM2-1.7B-Instruct",      # Best for lightweight chat, fastest inference
+                    "Qwen/Qwen2.5-1.5B-Instruct",                # Best multilingual, strong instruction following
+                    "microsoft/phi-2",                           # Best reasoning for its size (2.7B)
+                    "google/gemma-2b-it",                        # Solid all-around 2B model
+                    "meta-llama/Llama-3.2-1B-Instruct"           # Official small Llama from Meta
+                ],
+                value="HuggingFaceTB/SmolLM2-1.7B-Instruct",
+                    allow_custom_value=True,
+                    info="Select a free model or type any valid HF Model ID."
+                )
+                hf_token = gr.Textbox(
+                    label="HF Token (Optional)",
+                    placeholder="hf_...",
+                    type="password",
+                    info="Leave blank if using Space Secrets."
+                )
 
     gr.Markdown("---")
 
@@ -272,7 +284,7 @@ A stable prompt produces reliable, controlled outputs. An unstable one needs opt
 """)
             with gr.Row():
                 n_runs = gr.Slider(
-                    minimum=2, maximum=10, value=5, step=1,
+                    minimum=2, maximum=5, value=3, step=1,
                     label="Number of runs (N samples)",
                 )
                 temperature = gr.Slider(
@@ -296,7 +308,7 @@ A stable prompt produces reliable, controlled outputs. An unstable one needs opt
                 fn=run_analysis,
                 inputs=[
                     prompt_input, input_text, task_input,
-                    backend_choice, n_runs, temperature
+                    hf_model_id, hf_token, n_runs, temperature
                 ],
                 outputs=[
                     verdict_out, metrics_out, outputs_out,
@@ -304,6 +316,7 @@ A stable prompt produces reliable, controlled outputs. An unstable one needs opt
                 ],
             )
 
+        # Tab 2: Optimization
         with gr.TabItem("⚡ Optimization"):
             gr.Markdown("""
 Run Bayesian optimization (Optuna TPE) inside a LangGraph control loop.
@@ -319,7 +332,7 @@ Each cycle refines the previous cycle's best prompt - progressive improvement.
 
             with gr.Row():
                 n_trials = gr.Slider(
-                    minimum=5, maximum=50, value=20, step=5,
+                    minimum=3, maximum=12, value=6, step=1,
                     label="Optuna trials per iteration",
                 )
                 target_reach = gr.Slider(
@@ -327,7 +340,7 @@ Each cycle refines the previous cycle's best prompt - progressive improvement.
                     label="Target reachability (ceiling: 0.97)",
                 )
                 max_iter = gr.Slider(
-                    minimum=1, maximum=10, value=3, step=1,
+                    minimum=1, maximum=5, value=3, step=1,
                     label="Max graph iterations",
                 )
 
@@ -347,7 +360,7 @@ Each cycle refines the previous cycle's best prompt - progressive improvement.
             optimize_btn.click(
                 fn=run_optimization,
                 inputs=[
-                    prompt_input, input_text, task_input, backend_choice,
+                    prompt_input, input_text, task_input, hf_model_id, hf_token,
                     expected_output, n_trials, target_reach, max_iter, use_judge
                 ],
                 outputs=[opt_status, comparison_table, prompt_comparison],
@@ -361,10 +374,12 @@ based on average reachability across all historical evaluations.
 This is the feedback loop closing - the system remembers what worked.
 """)
             with gr.Row():
-                registry_task = gr.Textbox(
-                    label="Task",
+                registry_task = gr.Dropdown(
+                    label="Task to search",
+                    choices=TASK_CATEGORIES,
                     value="summarize",
-                    placeholder="summarize, classify, extract...",
+                    allow_custom_value=True,
+                    info="Select the category to query."
                 )
                 registry_limit = gr.Slider(
                     minimum=1, maximum=50, value=10, step=1,
@@ -388,4 +403,18 @@ Grounded in Bhargava et al. 2023 and Minsky 1986
 
 if __name__ == "__main__":
     init_db()  # Ensure DB is initialized before launching the app
-    demo.launch(server_name="0.0.0.0", server_port=7860)
+    
+    # Launch with Gradio 6.0 compatible parameters
+    demo.launch(
+        server_name="0.0.0.0", 
+        server_port=7860,
+        theme=gr.themes.Soft(),
+        css="""
+        .metric-box { 
+            background: #f8f9fa; 
+            border-radius: 8px; 
+            padding: 12px; 
+            margin: 4px;
+        }
+        """
+    )
