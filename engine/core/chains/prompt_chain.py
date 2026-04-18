@@ -3,16 +3,16 @@ from typing import Optional
 from enum import Enum
 import time
 import os
-import math
 import requests
 
+from huggingface_hub import InferenceClient
 from langchain_core.prompts import PromptTemplate
 
 
 class ModelBackend(Enum):
     OPENAI = "openai"
     OLLAMA = "ollama"
-
+    HUGGINGFACE = "huggingface"
     # ... further compability is easy to add
 
 
@@ -55,6 +55,59 @@ def _extract_openai_logprobs(response) -> list:
             for td in lp_content["content"]
         ]
     except (AttributeError, KeyError, TypeError):
+        return []
+
+
+def _build_huggingface_client() -> InferenceClient:
+    """
+    Creates the lightweight client that makes API calls to Hugging Face's servers.
+    """
+    token = os.getenv("HF_TOKEN")
+    if not token:
+        raise RuntimeError("HF_TOKEN is not set. Please add it to your environment.")
+    
+    return InferenceClient(token=token)
+
+
+def _build_huggingface_llm():
+    """
+    Builds and returns a reusable Hugging Face InferenceClient.
+    Defaults to Zephyr or Llama-3, which are free on the Serverless API.
+    """
+    from huggingface_hub import InferenceClient
+    
+    token = os.getenv("HF_TOKEN")
+    if not token:
+        raise RuntimeError("HF_TOKEN is not set in your environment.")
+        
+    model_id = os.getenv("HF_MODEL_ID", "meta-llama/Meta-Llama-3-8B-Instruct")
+    
+    # We bind the model ID to the client here, so it acts just like your OpenAI llm object
+    return InferenceClient(model=model_id, token=token)
+
+
+def _extract_hf_api_logprobs(response) -> list:
+    """
+    Extracts logprobs from the Hugging Face API ChatCompletion response.
+    Returns [] safely if the response doesn't contain logprob data.
+    """
+    try:
+        lp_content = response.choices[0].logprobs.content
+        if not lp_content:
+            return []
+            
+        return [
+            {
+                "token": td.token,
+                "logprob": td.logprob,
+                "top": [
+                    {"token": t.token, "logprob": t.logprob}
+                    for t in getattr(td, "top_logprobs", [])
+                ],
+            }
+            for td in lp_content
+        ]
+    except (AttributeError, KeyError, TypeError, IndexError):
         return []
 
 
@@ -126,7 +179,7 @@ def run_variant(
     template: str,
     input_text: str,
     task: str,
-    backend: ModelBackend = ModelBackend.OLLAMA,
+    backend: ModelBackend,
 ) -> VariantResult:
     """
     Runs one prompt variant and returns what the model produced.
@@ -148,7 +201,7 @@ def run_variant(
     if backend == ModelBackend.OLLAMA:
         return _run_ollama(rendered)
 
-    if backend == ModelBackend.OPENAI:
+    elif backend == ModelBackend.OPENAI:
         llm = _build_openai_llm()
         chain = prompt | llm
         start = time.time()
@@ -160,4 +213,29 @@ def run_variant(
             logprobs=_extract_openai_logprobs(response),
         )
 
-    raise ValueError(f"Unknown backend: {backend}")
+    elif backend == ModelBackend.HUGGINGFACE:
+        client = _build_huggingface_llm()
+        
+        rendered = prompt.format(task=task, input=input_text) # formatted is exclusive for HF as only client.text_generation provide probs
+        formatted = f"""### Instruction: 
+{rendered} 
+
+### Response:
+"""
+        start = time.time()
+        text = client.text_generation(
+            formatted,
+            max_new_tokens=150,
+            temperature=0.3,
+            do_sample=True,
+        )
+        elapsed_ms = (time.time() - start) * 1000
+        
+        return VariantResult(
+            text=text,
+            latency_ms=round(elapsed_ms, 2),
+            logprobs=[] # not supported but free so, there is a tradeoff
+        )
+
+    else:
+        raise ValueError(f"Unknown backend: {backend}")
