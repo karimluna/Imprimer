@@ -6,7 +6,7 @@ import re
 import os
 import requests
 
-from core.chains.prompt_chain import ModelBackend, _build_openai_llm
+from core.chains.prompt_chain import ModelBackend, _build_openai_llm, _build_huggingface_llm
 from utils.create_logger import get_logger
 
 logger = get_logger(__name__)
@@ -90,6 +90,22 @@ def _run_judge_ollama(prompt_text: str) -> str:
     resp.raise_for_status()
     content = resp.json().get("message", {}).get("content", "")
     # print(f"RAW JUDGE RESPONSE: {repr(content)}")  
+    return content
+
+def _run_judge_huggingface(prompt_text: str) -> str:
+    """
+    Runs the judge prompt through the Hugging Face API.
+    Uses the reusable client, no logprobs needed.
+    """
+    client = _build_huggingface_llm()
+    
+    response = client.chat_completion(
+        messages=[{"role": "user", "content": prompt_text}],
+        temperature=0.01,  # HF Inference API prefers > 0 for temperature
+        max_tokens=50,     # Just enough for a score and brief reasoning
+    )
+    
+    content = response.choices[0].message.content
     return content
 
 
@@ -180,8 +196,12 @@ def judge(
     try:
         if backend == ModelBackend.OLLAMA:
             raw_text = _run_judge_ollama(prompt_text)
-        else:
+        elif backend == ModelBackend.OPENAI:
             raw_text = _run_judge_openai(prompt_text)
+        elif backend == ModelBackend.HUGGINGFACE:
+            raw_text = _run_judge_huggingface(prompt_text)
+        else:
+            raise ValueError(f"Unknown backend: {backend}")
 
         scores = _parse_scores(raw_text)
 

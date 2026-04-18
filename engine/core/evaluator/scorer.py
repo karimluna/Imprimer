@@ -90,8 +90,10 @@ def score(
             result.logprobs, 
             baseline_logprobs=baseline_result.logprobs
         )
-    else:
+    elif result.logprobs:
         reachability = _compute_reachability(result.logprobs)
+    else:
+        reachability = _similarity(result.text, expected_output) # without logprobs similarity_score weights more
 
     latency_score = max(0.0, 1.0 - (result.latency_ms / LATENCY_BUDGET_MS))
     similarity_score = _similarity(result.text, expected_output)
