@@ -35,6 +35,8 @@ jobs:
           # Copy requirements to the root for Hugging Face s
           cp engine/requirements.txt ./requirements.txt
           
+          cp demo/HF_README.md ./README.md
+          
           # Commit exactly what the files look like right now
           git add .
           git commit -m "Clean auto-deploy to Hugging Face"
