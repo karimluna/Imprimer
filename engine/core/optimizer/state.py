@@ -1,42 +1,43 @@
 '''
-Shared state for the LangGraph optimization loop. 
+Shared state for the LangGraph optimization loop.
 '''
-
 from typing import TypedDict
-from core.chains.prompt_chain import ModelBackend
 
 
 class PromptState(TypedDict):
-    '''
-    State for the prompt optimization loop.
-    '''
-    task: str # never changes across iterations
+    # Task definition, never changes across iterations
+    task: str
     input_example: str
     expected_output: str
-    backend: ModelBackend
+    backend: str           # always a string (ModelBackend.value), never the enum
     use_judge: bool
-    base_prompt: str
-    
+    base_prompt: str       # immutable anchor, generator always reads this
+
     # Control parameters
-    target_reachability: float  # stop when?
-    max_iterations: int         # hard cap on graph cycles
+    target_reachability: float
+    max_iterations: int
     n_trials: int
 
     # Current state
-    current_prompt: str         # prompt being refined this cycle
+    current_prompt: str        # decorated candidate for this cycle
     current_iteration: int
 
-    # Best found so far by reachability
+    # RPE feedback, verbal explanation of why last iteration's best prompt won.
+    # Passed to the generator each cycle so Optuna's persona slot can use it.
+    # Starts as a neutral seed, updated by evaluator_node after each cycle.
+    last_feedback: str
+
+    # Best by reachability, used by controller for termination
     best_prompt: str
     best_reachability: float
     best_score: float
 
-    # Global best found so far by combined score
+    # Global best by combined score, returned to caller
     global_best_prompt: str
     global_best_score: float
     global_best_reachability: float
 
-    # Baseline
+    # Baseline, set once, never changes
     baseline_score: float
     baseline_reachability: float
 

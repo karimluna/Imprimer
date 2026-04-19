@@ -20,8 +20,9 @@ def _ensure_embedder() -> None:
         from sentence_transformers import SentenceTransformer, util  # type: ignore
 
         model_name = os.getenv("EMBEDDER_MODEL", "all-MiniLM-L6-v2")
+        hf_token = os.getenv("HF_TOKEN") 
         logger.info("Loading sentence-transformers embedder: %s", model_name)
-        _embedder = SentenceTransformer(model_name)
+        _embedder = SentenceTransformer(model_name, hf_token)
         _st_util = util
     except Exception as exc:
         _embedder_load_failed = True

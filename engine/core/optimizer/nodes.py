@@ -1,93 +1,139 @@
 '''
-LangGraph node functions for the prompt optimization graph. Each funcion
-is a node.
+LangGraph node functions for the prompt optimization graph.
 
-  generator  : runs Optuna TPE search over the mutation space (creative)
-  evaluator  : scores the generator's best candidate          (critical)
-  controller : decides whether to cycle back or terminate     (executive)
+  generator  : runs Optuna TPE search over one mutation dimension (creative)
+  evaluator  : scores the generator's candidate and generates feedback (critical)
+  controller : decides whether to cycle back or terminate (executive)
+
+RPE feedback loop:
+  After each evaluator run, a brief verbal explanation is generated
+  describing why the current best prompt works. This is injected into
+  the next generator cycle via the PERSONAS slot, the model learns
+  from its own prior successes at a semantic level.
 '''
 
 from core.optimizer.state import PromptState
-from core.optimizer.bayesian_search import optimize as bayesian_optimize
+from core.optimizer.bayesian_search import optimize as bayesian_optimize, PERSONAS
 from core.chains.prompt_chain import ModelBackend, run_variant
 from core.evaluator.scorer import score as compute_score
-from core.evaluator.judge import judge as llm_judge
 from utils.create_logger import get_logger
+import os
+import requests
+from core.optimizer.rpe import run_rpe
 
 logger = get_logger(__name__)
 
-DIMENSION_SEQUENCE = ["verb", "noun", "modality"]
 
-# 3 iterations in the graph corresponds to one full pass through all mutation dimensions
-def _dimension_for_iteration(iteration: int) -> str:
-    return DIMENSION_SEQUENCE[iteration % len(DIMENSION_SEQUENCE)]
+def _generate_feedback(
+    base_prompt: str,
+    best_prompt: str,
+    best_score: float,
+    backend: ModelBackend,
+) -> str:
+    """
+    Generates a brief verbal explanation of why the best prompt won.
+    This is the RPE feedback signal - passed to the next generator cycle
+    so the model builds on what worked rather than searching blindly.
+
+    Uses Ollama or OpenAI depending on backend.
+    Falls back to a neutral string on any failure - feedback is optional,
+    the graph must never crash because of it.
+    """
+    feedback_prompt = (
+        f"The following prompt scored {best_score:.3f} (higher is better):\n\n"
+        f"  Original: {base_prompt}\n"
+        f"  Improved: {best_prompt}\n\n"
+        f"In two sentences, explain what makes the improved version better. "
+        f"Focus on instruction clarity, specificity, or structure. "
+        f"Do not add any preamble."
+    )
+
+    try:
+        if backend == ModelBackend.OLLAMA:
+            base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+            model = os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b")
+            resp = requests.post(
+                f"{base_url}/api/chat",
+                json={
+                    "model": model,
+                    "messages": [{"role": "user", "content": feedback_prompt}],
+                    "stream": False,
+                    "options": {"temperature": 0.3},
+                },
+                timeout=30,
+            )
+            resp.raise_for_status()
+            return resp.json().get("message", {}).get("content", "").strip()
+
+        elif backend == ModelBackend.OPENAI:
+            from core.chains.prompt_chain import _build_openai_llm
+            llm = _build_openai_llm()
+            response = llm.invoke(feedback_prompt)
+            return response.content.strip()
+
+        else:
+            # HuggingFace or unknown - skip feedback, cost too high
+            return ""
+
+    except Exception as e:
+        logger.warning(f"feedback generation failed, skipping: {e}")
+        return ""
+
 
 
 def generator_node(state: PromptState) -> dict:
     """
-    Runs one optimization cycle over the mutation space.
+    Generator — one RPE iteration.
 
-    Each graph cycle activates one mutation dimension in sequence:
-    verb -> noun -> modality -> verb ...
+    Generates N candidate prompts via verbalized sampling,
+    scores each with SSC + optional reachability,
+    returns the best candidate to the evaluator.
+
+    LLM calls: 1 (generation) + N×K (SSC) + N×1 (similarity comparison)
+    With defaults: 1 + 5×2 + 5 = 16 calls per iteration.
     """
     iteration = state["current_iteration"]
-    base = state["base_prompt"]  # always the raw instruction, never decorated
-
-    dimension = _dimension_for_iteration(iteration)
+    backend = ModelBackend(state["backend"])
+    feedback = state.get("last_feedback", "")
 
     logger.info(
         f"generator iteration={iteration} "
-        f"dimension={dimension} "
-        f"base_prompt={base[:60]}"
+        f"backend={state['backend']} "
+        f"base_prompt={state['base_prompt'][:60]}"
     )
 
-    backend = ModelBackend(state["backend"])
-
-    result = bayesian_optimize(
+    result = run_rpe(
         task=state["task"],
-        base_prompt=base,
+        base_prompt=state["base_prompt"],
         input_example=state["input_example"],
         expected_output=state["expected_output"],
-        n_trials=state["n_trials"],
         backend=backend,
-        dimension=dimension,
-        # Pass study name so Optuna resumes across graph cycles —
-        # earlier trials from previous cycles inform this one.
-        # Note: same study name across iterations is intentional —
-        # TPE learns from all previous trials, not just this cycle's.
-        study_name=f"imprimer_{state['task']}",
+        feedback=feedback,
     )
 
     logger.info(
         f"generator iteration={iteration} "
-        f"candidate_score={result.best_score:.4f} "
-        f"candidate_reachability={result.best_reachability:.4f}"
+        f"best_score={result.best_score:.4f} "
+        f"best_reachability={result.best_reachability:.4f}"
     )
 
-    # Append this cycle's history to the global history
     cycle_history = [
         {**h, "iteration": iteration}
         for h in result.history
     ]
 
     return {
-        # current_prompt carries the decorated candidate to the evaluator
         "current_prompt": result.best_prompt,
         "history": state["history"] + cycle_history,
     }
 
-
 def evaluator_node(state: PromptState) -> dict:
     """
-    Scores the generator's candidate prompt.
+    Scores the generator's candidate and generates RPE feedback.
 
-    Runs the current prompt against the example input and computes:
-      - Reachability index (always)
-      - LLM-as-judge score (if use_judge=True)
-
-    If neither condition is met, increments the iteration counter
-    and returns control to the generator for another cycle. This is
-    to prevent the control's loop to run indefinitely.
+    Computes reachability + optional judge score.
+    Updates best_prompt (by reachability) and global_best_prompt (by combined).
+    Generates verbal feedback for the next generator cycle.
     """
     backend = ModelBackend(state["backend"])
 
@@ -97,11 +143,12 @@ def evaluator_node(state: PromptState) -> dict:
         task=state["task"],
         backend=backend,
     )
-    
+
     s = compute_score(
         result=result,
         task=state["task"],
         input_text=state["input_example"],
+        expected_output=state["expected_output"],  # was missing
         use_judge=state["use_judge"],
         backend=backend,
     )
@@ -113,14 +160,13 @@ def evaluator_node(state: PromptState) -> dict:
         f"evaluator iteration={state['current_iteration']} "
         f"reachability={reachability:.4f} "
         f"score={combined:.4f} "
-        f"current_best={state['best_reachability']:.4f} "
+        f"current_best_reach={state['best_reachability']:.4f} "
         f"global_best_score={state['global_best_score']:.4f}"
     )
 
-    updates = {}
+    updates: dict = {}
 
-    # Update best prompt by reachability when a candidate is as good or better.
-    # This is the signal used by the controller to decide termination.
+    # Update reachability-best (used by controller for termination)
     if reachability >= state["best_reachability"]:
         updates.update({
             "best_prompt": state["current_prompt"],
@@ -128,7 +174,7 @@ def evaluator_node(state: PromptState) -> dict:
             "best_score": combined,
         })
 
-    # Track the global best prompt by combined score only.
+    # Update global combined-best (returned to caller)
     if combined > state["global_best_score"]:
         updates.update({
             "global_best_prompt": state["current_prompt"],
@@ -136,16 +182,29 @@ def evaluator_node(state: PromptState) -> dict:
             "global_best_reachability": reachability,
         })
 
+    # Generate RPE feedback only when there was a genuine improvement
+    # - avoid burning an LLM call when the candidate didn't beat the baseline
+    if combined > state["global_best_score"] and state["current_prompt"] != state["base_prompt"]:
+        feedback = _generate_feedback(
+            base_prompt=state["base_prompt"],
+            best_prompt=state["current_prompt"],
+            best_score=combined,
+            backend=backend,
+        )
+        if feedback:
+            updates["last_feedback"] = feedback
+            logger.info(f"feedback generated: {feedback[:80]}...")
+
     return updates
 
 
 def controller_node(state: PromptState) -> dict:
     """
-    Controller, decides whether to continue or terminate.
+    Controller - decides whether to continue or terminate.
 
-    Termination conditions (either triggers exit):
-      1. best_reachability >= target_reachability (target met)
-      2. current_iteration >= max_iterations (iteration cap hit)
+    Termination:
+      1. best_reachability >= target_reachability
+      2. current_iteration >= max_iterations
     """
     iteration = state["current_iteration"]
     best_reach = state["best_reachability"]
@@ -170,10 +229,6 @@ def controller_node(state: PromptState) -> dict:
 
 
 def should_continue(state: PromptState) -> str:
-    """
-    Conditional edge function, is called after controller_node
-    to decide which node to route next.
-    """
     if state["target_reached"]:
         logger.info(
             f"graph terminating: target reachability "

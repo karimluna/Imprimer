@@ -37,6 +37,10 @@ TASK_CATEGORIES = [
     "qa"
 ]
 
+BACKEND_ID = ModelBackend.OLLAMA # harcoded backend for dev and demo
+
+BEST_PROMPT = []
+
 def _render_token_confidence(token_confidence: list) -> str:
     """
     Renders token-level confidence as colored HTML spans.
@@ -66,7 +70,7 @@ def _render_token_confidence(token_confidence: list) -> str:
     return html
 
 def run_optimization(
-    prompt, input_text, task, hf_model_id, hf_token,
+    prompt, input_text, task, model_id, hf_token,
     expected_output, n_trials, target_reachability, max_iterations, use_judge
 ):
     if not prompt or not task or not expected_output:
@@ -74,11 +78,15 @@ def run_optimization(
         return
 
     # Dynamically inject the UI variables into the environment for the backend
-    if hf_model_id:
-        os.environ["HF_MODEL_ID"] = hf_model_id
-    if hf_token:
-        os.environ["HF_TOKEN"] = hf_token
-
+    if BACKEND_ID == ModelBackend.HUGGINGFACE:
+        if model_id:
+            os.environ["HF_MODEL_ID"] = model_id
+        if hf_token:
+            os.environ["HF_TOKEN"] = hf_token
+    elif BACKEND_ID == ModelBackend.OLLAMA:
+        if model_id:
+            os.environ["OLLAMA_MODEL"] = model_id
+         
 
     # Yield the initial state so the user sees the original prompt right away
     initial_status = "⏳ **Optimization running...** (Evaluating variations, please wait)"
@@ -88,11 +96,9 @@ def run_optimization(
 ---
 
 **Optimized:**
-*⏳ Optimization in progress... This may take a few minutes.*
+*⏳ Optimization in progress...*
 """
     yield initial_status, None, initial_prompt_comparison
-
-    backend_enum = ModelBackend.HUGGINGFACE
 
     try:
         result = run_optimize(
@@ -101,7 +107,7 @@ def run_optimization(
             input_example=input_text,
             expected_output=expected_output,
             n_trials=int(n_trials),
-            backend=backend_enum,  # Pass the string value instead of enum
+            backend=BACKEND_ID,  # Pass the string value instead of enum
             use_judge=bool(use_judge),
             target_reachability=float(target_reachability),
             max_iterations=int(max_iterations),
@@ -135,7 +141,8 @@ def run_optimization(
 
     yield status, comparison_md, final_prompt_comparison
 
-def run_analysis(prompt, input_text, task, hf_model_id, hf_token, n_runs, temperature):
+
+def run_analysis(prompt, input_text, task, model_id, hf_token, n_runs, temperature):
     if not prompt or not task:
         return (
             "Prompt and task are required.",
@@ -143,19 +150,18 @@ def run_analysis(prompt, input_text, task, hf_model_id, hf_token, n_runs, temper
         )
 
     # Dynamically inject the UI variables into the environment for the backend
-    if hf_model_id:
-        os.environ["HF_MODEL_ID"] = hf_model_id
+    if model_id:
+        os.environ["HF_MODEL_ID"] = model_id
     if hf_token:
         os.environ["HF_TOKEN"] = hf_token
 
-    backend_enum = ModelBackend.HUGGINGFACE
 
     try:
         result = run_stability(
             prompt=prompt,
             input_text=input_text,
             task=task,
-            backend=backend_enum,
+            backend=BACKEND_ID,
             n_runs=int(n_runs),
             temperature=float(temperature),
         )
@@ -252,19 +258,36 @@ and Minsky's *The Society of Mind* (1986).
             )
             
             with gr.Row():
-                hf_model_id = gr.Dropdown(
-                    label="Hugging Face Model ID",
-                choices=[
-                    "HuggingFaceTB/SmolLM2-1.7B-Instruct",      # Best for lightweight chat, fastest inference
-                    "Qwen/Qwen2.5-1.5B-Instruct",                # Best multilingual, strong instruction following
-                    "microsoft/phi-2",                           # Best reasoning for its size (2.7B)
-                    "google/gemma-2b-it",                        # Solid all-around 2B model
-                    "meta-llama/Llama-3.2-1B-Instruct"           # Official small Llama from Meta
-                ],
-                value="HuggingFaceTB/SmolLM2-1.7B-Instruct",
-                    allow_custom_value=True,
-                    info="Select a free model or type any valid HF Model ID."
-                )
+                try:
+                    if BACKEND_ID == ModelBackend.HUGGINGFACE:
+                        model_id = gr.Dropdown(
+                            label="Hugging Face Model ID",
+                        choices=[
+                            "HuggingFaceTB/SmolLM2-1.7B-Instruct",      # Best for lightweight chat, fastest inference
+                            "Qwen/Qwen2.5-1.5B-Instruct",                # Best multilingual, strong instruction following
+                            "microsoft/phi-2",                           # Best reasoning for its size (2.7B)
+                            "google/gemma-2b-it",                        # Solid all-around 2B model
+                            "meta-llama/Llama-3.2-1B-Instruct"           # Official small Llama from Meta
+                        ],
+                        value="HuggingFaceTB/SmolLM2-1.7B-Instruct",
+                            allow_custom_value=True,
+                            info="Select a free model or type any valid HF Model ID."
+                        )
+                    else:
+                        model_id = gr.Dropdown(
+                            label="Ollama Model",
+                        choices=[
+                            "llama3.2:latest",                
+                            "qwen2.5:0.5b",                          
+                            "qwen2.5:1.5b",                        
+                        ],
+                        value="qwen2.5:1.5b",
+                            allow_custom_value=True,
+                            info="Select an available ollama model in your environment.."
+                        )
+                except Exception as e:
+                    raise f"No backend supported {e}"
+                
                 hf_token = gr.Textbox(
                     label="HF Token (Optional)",
                     placeholder="hf_...",
@@ -308,7 +331,7 @@ A stable prompt produces reliable, controlled outputs. An unstable one needs opt
                 fn=run_analysis,
                 inputs=[
                     prompt_input, input_text, task_input,
-                    hf_model_id, hf_token, n_runs, temperature
+                    model_id, hf_token, n_runs, temperature
                 ],
                 outputs=[
                     verdict_out, metrics_out, outputs_out,
@@ -360,7 +383,7 @@ Each cycle refines the previous cycle's best prompt - progressive improvement.
             optimize_btn.click(
                 fn=run_optimization,
                 inputs=[
-                    prompt_input, input_text, task_input, hf_model_id, hf_token,
+                    prompt_input, input_text, task_input, model_id, hf_token,
                     expected_output, n_trials, target_reach, max_iter, use_judge
                 ],
                 outputs=[opt_status, comparison_table, prompt_comparison],
