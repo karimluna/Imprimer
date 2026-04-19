@@ -44,7 +44,6 @@ BEST_PROMPT = []
 def _render_token_confidence(token_confidence: list) -> str:
     """
     Renders token-level confidence as colored HTML spans.
-    High certainty -> green, low certainty -> red.
     """
     if not token_confidence:
         return "<p>No token confidence data available.</p>"
@@ -52,7 +51,6 @@ def _render_token_confidence(token_confidence: list) -> str:
     html = "<p style='font-family: monospace; font-size: 14px; line-height: 2;'>"
     for tc in token_confidence:
         certainty = tc.get("certainty", 0.5)
-        # Map certainty to color: red (low) → yellow → green (high)
         r = int(255 * (1 - certainty))
         g = int(255 * certainty)
         b = 0
@@ -71,10 +69,11 @@ def _render_token_confidence(token_confidence: list) -> str:
 
 def run_optimization(
     prompt, input_text, task, model_id, hf_token,
-    expected_output, n_trials, target_reachability, max_iterations, use_judge
+    expected_output, n_variants, target_score, max_iterations, use_judge
 ):
-    if not prompt or not task or not expected_output:
-        yield "Prompt, task, and expected output are required.", None, None
+    global BEST_PROMPT
+    if not prompt or not task:
+        yield "Prompt, task, and expected output are required.", None, None, None
         return
 
     # Dynamically inject the UI variables into the environment for the backend
@@ -86,75 +85,96 @@ def run_optimization(
     elif BACKEND_ID == ModelBackend.OLLAMA:
         if model_id:
             os.environ["OLLAMA_MODEL"] = model_id
-         
 
-    # Yield the initial state so the user sees the original prompt right away
     initial_status = "⏳ **Optimization running...** (Evaluating variations, please wait)"
-    initial_prompt_comparison = f"""**Original:**
-{prompt}
-
----
-
-**Optimized:**
-*⏳ Optimization in progress...*
-"""
-    yield initial_status, None, initial_prompt_comparison
+    initial_prompt_comparison = f"**Original:**\n{prompt}\n\n---\n\n**Optimized:**\n*⏳ Optimization in progress...*"
+    initial_feedback = "⏳ *Waiting for AI judge to generate initial reflection...*"
+    yield initial_status, None, initial_prompt_comparison, initial_feedback
 
     try:
-        result = run_optimize(
+        optimizer_output = run_optimize(
             task=task,
             base_prompt=prompt,
             input_example=input_text,
             expected_output=expected_output,
-            n_trials=int(n_trials),
-            backend=BACKEND_ID,  # Pass the string value instead of enum
+            n_variants=int(n_variants),
+            backend=BACKEND_ID,
             use_judge=bool(use_judge),
-            target_reachability=float(target_reachability),
+            use_rpe=True,
+            target_score=float(target_score), 
             max_iterations=int(max_iterations),
         )
+        
+        final_result = None
+        
+        if hasattr(optimizer_output, '__iter__') and not isinstance(optimizer_output, dict):
+            for step_result in optimizer_output:
+                final_result = step_result
+                BEST_PROMPT.append(step_result.get('best_prompt', ''))
+                
+                # Safely pull the iteration count (graphs generally track this in state)
+                iteration = step_result.get('iterations_completed', step_result.get('current_iteration', 1))
+                
+                status_temp = f"⏳ **Optimization running...** (Cycle {iteration} of {max_iterations})"
+                
+                comparison_md = f"""
+| | Before | Best So Far |
+|---|---|---|
+| **Score** | {step_result.get('baseline_score', 0):.4f} | **{step_result.get('best_score', 0):.4f}** |
+| Improvement | | **+{step_result.get('improvement', 0):.4f}** |
+| Iterations | | {iteration} |
+"""
+                # Update visual display of the prompt
+                temp_prompt_comparison = f"**Original:**\n{prompt}\n\n---\n\n**Current Best Variant (Cycle {iteration}):**\n{step_result.get('best_prompt', '')}"
+                
+                # Fetch LangGraph's feedback from the state
+                feedback_str = step_result.get('feedback', '')
+                if feedback_str:
+                    feedback_md = f"**AI Reflection (Cycle {iteration}):**\n> {feedback_str}"
+                else:
+                    feedback_md = "⏳ *Generating new variations and scoring...*"
+
+                yield status_temp, comparison_md, temp_prompt_comparison, feedback_md
+        else:
+            final_result = optimizer_output
+            BEST_PROMPT.append(final_result.get('best_prompt', ''))
+            
     except Exception as e:
-        yield f"Optimization Error: {str(e)}", None, initial_prompt_comparison
+        yield f"Optimization Error: {str(e)}", None, initial_prompt_comparison, f"Error: {str(e)}"
         return
 
     # --- FINAL UI UPDATE ---
-    status = "✅ Target reached" if result.get("target_reached") else "⏹ Iteration cap reached"
+    result = final_result or {}
+    status = "✅ Target score reached" if result.get("target_reached") else "⏹ Iteration cap reached"
+    final_iteration = result.get('iterations_completed', result.get('current_iteration', max_iterations))
 
     comparison_md = f"""
 | | Before | After |
 |---|---|---|
-| Score | {result['baseline_score']:.4f} | {result['best_score']:.4f} |
-| Reachability | {result['baseline_reachability']:.4f} | {result['best_reachability']:.4f} |
-| Improvement | | **+{result['improvement']:.4f}** |
-| Trials run | | {result['trials_run']} |
-| Iterations | | {result['iterations_completed']} |
+| **Score** | {result.get('baseline_score', 0):.4f} | **{result.get('best_score', 0):.4f}** |
+| Improvement | | **+{result.get('improvement', 0):.4f}** |
+| Iterations | | {final_iteration} |
 | Status | | {status} |
 """
 
-    final_prompt_comparison = f"""**Original:**
-{prompt}
+    final_prompt_comparison = f"**Original:**\n{prompt}\n\n---\n\n**Optimized:**\n{result.get('best_prompt', 'No optimized prompt returned')}"
+    final_feedback = f"✅ **Optimization Complete**\n> {result.get('feedback', 'Target reached or maximum iterations exhausted.')}"
 
----
-
-**Optimized:**
-{result['best_prompt']}
-"""
-
-    yield status, comparison_md, final_prompt_comparison
+    yield status, comparison_md, final_prompt_comparison, final_feedback
 
 
 def run_analysis(prompt, input_text, task, model_id, hf_token, n_runs, temperature):
+
     if not prompt or not task:
         return (
             "Prompt and task are required.",
             None, None, None, None, None
         )
 
-    # Dynamically inject the UI variables into the environment for the backend
     if model_id:
         os.environ["HF_MODEL_ID"] = model_id
     if hf_token:
         os.environ["HF_TOKEN"] = hf_token
-
 
     try:
         result = run_stability(
@@ -168,7 +188,6 @@ def run_analysis(prompt, input_text, task, model_id, hf_token, n_runs, temperatu
     except Exception as e:
         return f"Analysis Error: {str(e)}", None, None, None, None, None
 
-    # Metrics table
     metrics_md = f"""
 | Metric | Value |
 |---|---|
@@ -178,22 +197,15 @@ def run_analysis(prompt, input_text, task, model_id, hf_token, n_runs, temperatu
 | Variance | {result.variance:.6f} |
 """
 
-    # Outputs
     outputs_text = ""
     for i, out in enumerate(result.outputs):
         outputs_text += f"**Run {i+1}:**\n{out}\n\n---\n\n"
 
-    # Token confidence visualization — color coded HTML
     token_html = _render_token_confidence([
-        {
-            "token": tc.token,
-            "certainty": tc.certainty,
-            "logprob": tc.logprob,
-        }
+        {"token": tc.token, "certainty": tc.certainty, "logprob": tc.logprob}
         for tc in result.token_confidence
     ])
 
-    # Stability verdict
     score = result.stability_score
     if score >= 0.80:
         verdict = "🟢 **High stability** — this prompt reliably controls the model."
@@ -205,15 +217,16 @@ def run_analysis(prompt, input_text, task, model_id, hf_token, n_runs, temperatu
     return verdict, metrics_md, outputs_text, token_html, result, None
 
 def query_best(task, limit):
+    # [Same as your existing code...]
     if not task:
         return "Task is required."
     try:
         result = best_variant_for_task(task, limit=int(limit))
         if not result.get("task"):
             return f"No evaluations found for task '{task}'."
+        
         return f"""**Task:** {result['task']}
 **Evaluations sampled:** {result['evaluations']}
-**Avg reachability:** {result['avg_reachability']:.4f}
 **Avg score:** {result['avg_score']:.4f}
 
 **Best prompt:** {result['best_template']}
@@ -229,9 +242,6 @@ with gr.Blocks(title="Imprimer - LLM Prompt Control") as demo:
 
 > *Prompts don't instruct a unified mind - they activate configurations within it.*
 > Imprimer makes those activations **measurable**, **comparable**, and **improvable**.
-
-Grounded in *"What's the Magic Word? A Control Theory of LLM Prompting"* (Bhargava et al., 2023)
-and Minsky's *The Society of Mind* (1986).
 """)
 
     with gr.Row():
@@ -248,13 +258,11 @@ and Minsky's *The Society of Mind* (1986).
                 lines=3,
             )
             
-            # The Task Input for the active run
             task_input = gr.Dropdown(
                 label="Task type",
                 choices=TASK_CATEGORIES,
                 value="summarize",
                 allow_custom_value=True,
-                info="Select a category or type a new one."
             )
             
             with gr.Row():
@@ -262,28 +270,26 @@ and Minsky's *The Society of Mind* (1986).
                     if BACKEND_ID == ModelBackend.HUGGINGFACE:
                         model_id = gr.Dropdown(
                             label="Hugging Face Model ID",
-                        choices=[
-                            "HuggingFaceTB/SmolLM2-1.7B-Instruct",      # Best for lightweight chat, fastest inference
-                            "Qwen/Qwen2.5-1.5B-Instruct",                # Best multilingual, strong instruction following
-                            "microsoft/phi-2",                           # Best reasoning for its size (2.7B)
-                            "google/gemma-2b-it",                        # Solid all-around 2B model
-                            "meta-llama/Llama-3.2-1B-Instruct"           # Official small Llama from Meta
-                        ],
-                        value="HuggingFaceTB/SmolLM2-1.7B-Instruct",
+                            choices=[
+                                "HuggingFaceTB/SmolLM2-1.7B-Instruct",
+                                "Qwen/Qwen2.5-1.5B-Instruct",
+                                "microsoft/phi-2",
+                                "google/gemma-2b-it",
+                                "meta-llama/Llama-3.2-1B-Instruct"
+                            ],
+                            value="HuggingFaceTB/SmolLM2-1.7B-Instruct",
                             allow_custom_value=True,
-                            info="Select a free model or type any valid HF Model ID."
                         )
                     else:
                         model_id = gr.Dropdown(
                             label="Ollama Model",
-                        choices=[
-                            "llama3.2:latest",                
-                            "qwen2.5:0.5b",                          
-                            "qwen2.5:1.5b",                        
-                        ],
-                        value="qwen2.5:1.5b",
+                            choices=[
+                                "llama3.2:latest",                
+                                "qwen2.5:0.5b",                          
+                                "qwen2.5:1.5b",                        
+                            ],
+                            value="qwen2.5:1.5b",
                             allow_custom_value=True,
-                            info="Select an available ollama model in your environment.."
                         )
                 except Exception as e:
                     raise f"No backend supported {e}"
@@ -292,7 +298,6 @@ and Minsky's *The Society of Mind* (1986).
                     label="HF Token (Optional)",
                     placeholder="hf_...",
                     type="password",
-                    info="Leave blank if using Space Secrets."
                 )
 
     gr.Markdown("---")
@@ -301,22 +306,11 @@ and Minsky's *The Society of Mind* (1986).
 
         # Tab 1: Analysis 
         with gr.TabItem("🔬 Stability Analysis"):
-            gr.Markdown("""
-Run the same prompt multiple times to measure output consistency and token-level confidence.
-A stable prompt produces reliable, controlled outputs. An unstable one needs optimization.
-""")
             with gr.Row():
-                n_runs = gr.Slider(
-                    minimum=2, maximum=5, value=3, step=1,
-                    label="Number of runs (N samples)",
-                )
-                temperature = gr.Slider(
-                    minimum=0.1, maximum=1.5, value=0.7, step=0.1,
-                    label="Temperature (>0 for meaningful variance)",
-                )
+                n_runs = gr.Slider(minimum=2, maximum=5, value=3, step=1, label="Number of runs (N samples)")
+                temperature = gr.Slider(minimum=0.1, maximum=1.5, value=0.7, step=0.1, label="Temperature")
 
             analyze_btn = gr.Button("🔬 Analyze Prompt", variant="primary")
-
             verdict_out = gr.Markdown()
 
             with gr.Row():
@@ -324,7 +318,6 @@ A stable prompt produces reliable, controlled outputs. An unstable one needs opt
 
             outputs_out = gr.Markdown(label="Sample Outputs")
             token_html_out = gr.HTML(label="Token Confidence")
-
             _analysis_state = gr.State()
 
             analyze_btn.click(
@@ -342,39 +335,28 @@ A stable prompt produces reliable, controlled outputs. An unstable one needs opt
         # Tab 2: Optimization
         with gr.TabItem("⚡ Optimization"):
             gr.Markdown("""
-Run Bayesian optimization (Optuna TPE) inside a LangGraph control loop.
-The graph cycles until the reachability target is met or the iteration cap is hit.
-Each cycle refines the previous cycle's best prompt - progressive improvement.
+Run Reflective Prompt Optimization inside a LangGraph control loop. The LLM generates its own variant prompts based on the current best and verbal feedback from prior rounds.
 """)
             with gr.Row():
                 expected_output = gr.Textbox(
-                    label="Optimization objective (optional but recommended)",
-                    placeholder="What should the ideal output look like?",
+                    label="Reference Output for Similarity Scoring",
+                    placeholder="e.g., 'Positive' (Best for classification/extraction. Leave blank for creative tasks)",
                     lines=2,
                 )
 
             with gr.Row():
-                n_trials = gr.Slider(
-                    minimum=3, maximum=12, value=6, step=1,
-                    label="Optuna trials per iteration",
-                )
-                target_reach = gr.Slider(
-                    minimum=0.5, maximum=0.97, value=0.80, step=0.01,
-                    label="Target reachability (ceiling: 0.97)",
-                )
-                max_iter = gr.Slider(
-                    minimum=1, maximum=5, value=3, step=1,
-                    label="Max graph iterations",
-                )
+                n_variants = gr.Slider(minimum=2, maximum=5, value=3, step=1, label="Variants per iteration")
+                target_score= gr.Slider(minimum=0.5, maximum=0.97, value=0.80, step=0.01, label="Target score")
+                max_iter = gr.Slider(minimum=1, maximum=5, value=3, step=1, label="Max graph iterations")
 
-            use_judge = gr.Checkbox(
-                label="Enable LLM-as-judge scoring (slower, more accurate)",
-                value=False,
-            )
-
+            use_judge = gr.Checkbox(label="Enable LLM-as-judge scoring (slower, more accurate)", value=False)
             optimize_btn = gr.Button("⚡ Optimize Prompt", variant="primary")
 
             opt_status = gr.Markdown()
+            
+            # --- Added visual feedback box for iteration UX ---
+            with gr.Row():
+                feedback_box = gr.Markdown()
 
             with gr.Row():
                 comparison_table = gr.Markdown(label="Before vs After")
@@ -384,17 +366,17 @@ Each cycle refines the previous cycle's best prompt - progressive improvement.
                 fn=run_optimization,
                 inputs=[
                     prompt_input, input_text, task_input, model_id, hf_token,
-                    expected_output, n_trials, target_reach, max_iter, use_judge
+                    expected_output, n_variants, target_score, max_iter, use_judge
                 ],
-                outputs=[opt_status, comparison_table, prompt_comparison],
+                # Now outputting four fields, appending feedback_box
+                outputs=[opt_status, comparison_table, prompt_comparison, feedback_box],
             )
 
         # Tab 3: Registry 
         with gr.TabItem("📚 Registry"):
             gr.Markdown("""
 Query the registry for the best known prompt for a given task,
-based on average reachability across all historical evaluations.
-This is the feedback loop closing - the system remembers what worked.
+based on the **average historical score** across all evaluations.
 """)
             with gr.Row():
                 registry_task = gr.Dropdown(
@@ -402,12 +384,8 @@ This is the feedback loop closing - the system remembers what worked.
                     choices=TASK_CATEGORIES,
                     value="summarize",
                     allow_custom_value=True,
-                    info="Select the category to query."
                 )
-                registry_limit = gr.Slider(
-                    minimum=1, maximum=50, value=10, step=1,
-                    label="Evaluations to sample",
-                )
+                registry_limit = gr.Slider(minimum=1, maximum=50, value=10, step=1, label="Evaluations to sample")
 
             registry_btn = gr.Button("📚 Query Registry", variant="secondary")
             registry_out = gr.Markdown()
@@ -420,14 +398,12 @@ This is the feedback loop closing - the system remembers what worked.
 
     gr.Markdown("""
 ---
-**Imprimer** · [GitHub](https://github.com/BalorLC3/Imprimer) ·
-Grounded in Bhargava et al. 2023 and Minsky 1986
+**Imprimer** · [GitHub](https://github.com/BalorLC3/Imprimer) · Karim luna
 """)
 
 if __name__ == "__main__":
-    init_db()  # Ensure DB is initialized before launching the app
+    init_db()  
     
-    # Launch with Gradio 6.0 compatible parameters
     demo.launch(
         server_name="0.0.0.0", 
         server_port=7860,
