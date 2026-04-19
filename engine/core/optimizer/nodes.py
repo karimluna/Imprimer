@@ -26,24 +26,29 @@ logger = get_logger(__name__)
 
 def _generate_feedback(
     base_prompt: str,
-    best_prompt: str,
-    best_score: float,
+    current_prompt: str,
+    base_score: float,
+    current_score: float,
     backend: ModelBackend,
 ) -> str:
     """
-    Generates a brief verbal explanation of why the best prompt won.
-    This is the RPE feedback signal - passed to the next generator cycle
-    so the model builds on what worked rather than searching blindly.
-
-    Uses Ollama or OpenAI depending on backend.
-    Falls back to a neutral string on any failure - feedback is optional,
-    the graph must never crash because of it.
+    Generates a brief verbal explanation of why the prompt succeeded or failed.
     """
+    is_improvement = current_score > base_score
+    
+    if is_improvement:
+        context = "improved the score"
+        instruction = "explain what makes the new version better so we can keep doing it."
+    else:
+        context = "caused the score to drop"
+        instruction = "explain why the new version performed worse so we can avoid this mistake next time."
+
     feedback_prompt = (
-        f"The following prompt scored {best_score:.3f} (higher is better):\n\n"
-        f"  Original: {base_prompt}\n"
-        f"  Improved: {best_prompt}\n\n"
-        f"In two sentences, explain what makes the improved version better. "
+        f"We are optimizing an AI prompt. The previous best prompt scored {base_score:.3f}.\n"
+        f"The new prompt scored {current_score:.3f}, which means it {context}.\n\n"
+        f"  Previous: {base_prompt}\n"
+        f"  New: {current_prompt}\n\n"
+        f"In two sentences, {instruction} "
         f"Focus on instruction clarity, specificity, or structure. "
         f"Do not add any preamble."
     )
@@ -72,7 +77,6 @@ def _generate_feedback(
             return response.content.strip()
 
         else:
-            # HuggingFace or unknown - skip feedback, cost too high
             return ""
 
     except Exception as e:
@@ -123,7 +127,23 @@ def generator_node(state: PromptState) -> dict:
         from core.optimizer.bayesian_search import optimize as bayesian_optimize, DIMENSION_SEQUENCE
         dimension = DIMENSION_SEQUENCE[iteration % len(DIMENSION_SEQUENCE)]
 
-        extra_personas = [feedback] if feedback else []
+        # Parse raw feedback string into structured Optuna hints ---
+        reflection_hints = {}
+        if feedback:
+            f_lower = feedback.lower()
+            
+            #map semantic feedback to exact strings
+            if "verbose" in f_lower or "too long" in f_lower or "concise" in f_lower:
+                reflection_hints["output_contract"] = "Output only the answer, no preamble."
+            
+            if "hedge" in f_lower or "uncertain" in f_lower or "confident" in f_lower:
+                reflection_hints["hedging"] = "Be definitive."
+                
+            if "unprofessional" in f_lower or "expert" in f_lower:
+                reflection_hints["persona"] = "You are an expert in this domain."
+
+        # Only pass the dictionary if we actually extracted actionable hints
+        hints_to_pass = reflection_hints if reflection_hints else None
 
         result = bayesian_optimize(
             task=state["task"],
@@ -134,7 +154,7 @@ def generator_node(state: PromptState) -> dict:
             backend=backend,
             dimension=dimension,
             study_name=f"imprimer_{state['task']}_{dimension}",
-            extra_personas=extra_personas,
+            reflection_hints=hints_to_pass, 
         )
         best_prompt = result.best_prompt
         cycle_history = [{**h, "iteration": iteration} for h in result.history]
@@ -168,14 +188,18 @@ def evaluator_node(state: PromptState) -> dict:
         backend=backend,
     )
 
+    # skip ssc in early iteration
+    _use_judge = False if state.get('current_iteration', 0) == 0 else state['use_judge']
+
     s = compute_score(
         result=result,
         task=state["task"],
         input_text=state["input_example"],
         expected_output=state["expected_output"],  # was missing
-        use_judge=state["use_judge"],
+        use_judge=_use_judge,
         backend=backend,
     )
+
 
     reachability = s.reachability
     combined = s.combined
@@ -190,30 +214,27 @@ def evaluator_node(state: PromptState) -> dict:
 
     updates: dict = {}
 
-    # Update reachability-best (used by controller for termination)
-    if reachability >= state["best_reachability"]:
-        updates.update({
-            "best_prompt": state["current_prompt"],
-            "best_reachability": reachability,
-            "best_score": combined,
-        })
+    is_new_best = combined > state["global_best_score"]
 
     # Update global combined-best (returned to caller)
-    if combined > state["global_best_score"]:
+    if is_new_best:
         updates.update({
             "global_best_prompt": state["current_prompt"],
             "global_best_score": combined,
             "global_best_reachability": reachability,
         })
 
-    # Generate RPE feedback only when there was a genuine improvement
-    
-    
-    if combined > state["baseline_score"] and state["current_prompt"] != state["base_prompt"]:
+    # ALWAYS generate feedback to learn from the attempt (Success or Failure)
+    if state["current_prompt"] != state["base_prompt"]:
+        # We compare the current attempt against the global best we had before this attempt
+        previous_best_prompt = state.get("global_best_prompt", state["base_prompt"])
+        previous_best_score = state.get("global_best_score", state["baseline_score"])
+        
         feedback = _generate_feedback(
-            base_prompt=state["base_prompt"],
-            best_prompt=state["current_prompt"],
-            best_score=combined,
+            base_prompt=previous_best_prompt,
+            current_prompt=state["current_prompt"],
+            base_score=previous_best_score,
+            current_score=combined,
             backend=backend,
         )
         if feedback:
@@ -221,7 +242,6 @@ def evaluator_node(state: PromptState) -> dict:
             logger.info(f"feedback generated: {feedback[:80]}...")
 
     return updates
-
 
 def controller_node(state: PromptState) -> dict:
     """
@@ -237,7 +257,7 @@ def controller_node(state: PromptState) -> dict:
     max_iter = state["max_iterations"]
 
     baseline = state["baseline_score"]
-    target_reached = (best_score >= target or best_score > baseline) 
+    target_reached = best_score >= target 
     cap_reached = iteration >= max_iter - 1
 
     logger.info(
@@ -258,7 +278,7 @@ def controller_node(state: PromptState) -> dict:
 def should_continue(state: PromptState) -> str:
     if state["target_reached"]:
         logger.info(
-            f"graph terminating: target reachability "
+            f"graph terminating: target score "
             f"{state['target_score']:.4f} reached"
         )
         return "end"

@@ -1,14 +1,16 @@
-# engine/core/evaluator/scorer.py
 import math
 from dataclasses import dataclass
 from typing import Optional
+import json
+import hashlib
+
 
 from core.chains.prompt_chain import VariantResult, ModelBackend
 from core.evaluator.embedder import similarity as _similarity
 from utils.create_logger import get_logger
 
 logger = get_logger(__name__)
-
+_SCORE_CACHE = {}
 
 OPEN_ENDED_TASKS = {
     "summarize",
@@ -78,6 +80,8 @@ def _creative_quality_heuristic(text: str) -> float:
     length_score = 1.0 / (1.0 + math.exp(-0.1 * (len(tokens) - 50)))
     
     return round(0.6 * diversity + 0.4 * length_score, 4)
+
+
 def score(
         result: VariantResult,
         baseline_result: Optional[VariantResult] = None,
@@ -91,6 +95,19 @@ def score(
     """
     Scores a variant result with consistent, flexible dimension weighting.
     """
+
+    cache_state = json.dumps({
+        "result": result.text,
+        "task": task,
+        "expected_output": expected_output
+    })
+
+    key = hashlib.sha256(cache_state.encode('utf-8')).hexdigest()
+
+    if key in _SCORE_CACHE:
+        return _SCORE_CACHE[key]
+    
+
     # Default weights guarantee stability across different configurations
     if weights is None:
         weights = {"quality": 0.20, "reachability": 0.60, "latency": 0.20}
@@ -134,11 +151,15 @@ def score(
         weights["reachability"] * reachability + 
         weights["latency"] * latency_score
     )
-    
-    return Score(
+
+    s = Score(
         reachability=reachability,
         latency_score=round(latency_score, 3),
         combined=round(combined, 3),
         quality_score=round(quality_score, 3),
         similarity=round(similarity_score, 3),
     )
+
+    _SCORE_CACHE[key] = s
+    
+    return s

@@ -67,7 +67,7 @@ def optimize(
     use_judge: bool = False,
     use_rpe: bool = True,
     target_score: float = 0.80, # we are fine with a better score than the baseline, so just updating it based on that is okay
-    max_iterations: int = 3,
+    max_iterations: int = 5,
 ) -> dict:
     """
     Entry point for the LangGraph optimization loop.
@@ -84,7 +84,7 @@ def optimize(
         task=task,
         backend=backend,
     )
-
+    
     baseline_score_obj = compute_score(
         result=baseline_result,
         task=task,

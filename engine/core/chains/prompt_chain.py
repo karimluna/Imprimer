@@ -1,13 +1,15 @@
 from dataclasses import dataclass, field
-from typing import Optional
 from enum import Enum
 import time
 import os
 import requests
+import hashlib
+import json
 
-from huggingface_hub import InferenceClient
+
 from langchain_core.prompts import PromptTemplate
 
+_VARIANT_CACHE = {}
 
 class ModelBackend(Enum):
     OPENAI = "openai"
@@ -68,16 +70,6 @@ def _extract_openai_logprobs(response) -> list:
         return []
 
 
-def _build_huggingface_client() -> InferenceClient:
-    """
-    Creates the lightweight client that makes API calls to Hugging Face's servers.
-    """
-    token = os.getenv("HF_TOKEN")
-    if not token:
-        raise RuntimeError("HF_TOKEN is not set. Please add it to your environment.")
-    
-    return InferenceClient(token=token)
-
 
 def _build_huggingface_llm():
     """
@@ -100,6 +92,9 @@ def _extract_hf_api_logprobs(response) -> list:
     """
     Extracts logprobs from the Hugging Face API ChatCompletion response.
     Returns [] safely if the response doesn't contain logprob data.
+
+    Is temporally discarded as really depends on provider wheter the 
+    model returns logprobs.
     """
     try:
         lp_content = response.choices[0].logprobs.content
@@ -199,6 +194,18 @@ def run_variant(
       OPENAI  - external API, full logprobs, stronger base model
 
     """
+    cache_state = json.dumps({
+        "template": template, 
+        "input_text": input_text, 
+        "task": task, 
+        "backend": backend.value
+    }, sort_keys=True)
+
+    key = hashlib.sha256(cache_state.encode('utf-8')).hexdigest()
+    
+    if key in _VARIANT_CACHE:
+        return _VARIANT_CACHE[key]
+    
     safe_template = _normalize_template(template) # normalizing to ensure {input} exists
 
     prompt = PromptTemplate(
@@ -211,7 +218,7 @@ def run_variant(
     rendered = prompt.format(task=task, input=input_text)
 
     if backend == ModelBackend.OLLAMA:
-        return _run_ollama(rendered)
+        result = _run_ollama(rendered)
 
     elif backend == ModelBackend.OPENAI:
         llm = _build_openai_llm()
@@ -219,11 +226,12 @@ def run_variant(
         start = time.time()
         response = chain.invoke({"task": task, "input": input_text})
         elapsed_ms = (time.time() - start) * 1000
-        return VariantResult(
+        result = VariantResult(
             text=response.content,
             latency_ms=round(elapsed_ms, 2),
             logprobs=_extract_openai_logprobs(response),
         )
+
 
     elif backend == ModelBackend.HUGGINGFACE:
         client = _build_huggingface_llm()
@@ -243,11 +251,15 @@ def run_variant(
         )
         elapsed_ms = (time.time() - start) * 1000
         
-        return VariantResult(
+        result = VariantResult(
             text=text,
             latency_ms=round(elapsed_ms, 2),
             logprobs=[] # not supported but free so, there is a tradeoff
         )
-
+    
     else:
         raise ValueError(f"Unknown backend: {backend}")
+    
+    # caching to avoid trials and iterations
+    _VARIANT_CACHE[key] = result
+    return result
