@@ -1,6 +1,7 @@
 import os
 from difflib import SequenceMatcher
 from typing import Any
+import torch  
 
 from utils.create_logger import get_logger
 from huggingface_hub import login 
@@ -29,8 +30,11 @@ def _ensure_embedder() -> None:
             except Exception as auth_exc:
                 logger.warning("HF login failed, attempting to load model anyway: %s", auth_exc)
 
-        logger.info("Loading sentence-transformers embedder: %s", model_name)
-        _embedder = SentenceTransformer(model_name_or_path=model_name)
+        # Line 2: Auto-detect device (CUDA -> MPS -> CPU)
+        device = 'cuda' if torch.cuda.is_available() else ('mps' if torch.backends.mps.is_available() else 'cpu')
+        
+        logger.info("Loading sentence-transformers embedder: %s on %s", model_name, device)
+        _embedder = SentenceTransformer(model_name_or_path=model_name, device=device)
         _st_util = util
     except Exception as exc:
         _embedder_load_failed = True

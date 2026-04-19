@@ -43,8 +43,6 @@ def _run_with_temperature(
     if backend == ModelBackend.OLLAMA:
         base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
         model = os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b")
-        # We avoid reuse the run_variant in prompt_chain.py because it 
-        # has a bit difference that make more annoying integrate both
         payload = {
             "model": model,
             "messages": [{"role": "user", "content": prompt_text}],
@@ -119,7 +117,7 @@ def _run_with_temperature(
         model_id = os.environ.get("HF_MODEL_ID", "meta-llama/Meta-Llama-3-8B-Instruct")
         client = InferenceClient(model=model_id, token=token)
 
-        formatted =  f"""### Instruction: 
+        formatted = f"""### Instruction: 
 {prompt_text} 
 
 ### Response:
@@ -131,7 +129,7 @@ def _run_with_temperature(
             do_sample=True,
         )
 
-        logprobs = [] # sadly there are no logprobs from inference hf
+        logprobs = []
         return text, logprobs
 
     else:
@@ -152,12 +150,19 @@ def analyze(
 ) -> StabilityResult:
     """
     Runs the prompt N times and measures output stability.
+
+    FIX (Problem 5): detects extreme output length variance and adds a
+    temperature warning to the recommendation when max/min output length
+    ratio exceeds 3×. This is almost always the cause of instability on
+    classify/extract tasks where the model sometimes produces a terse
+    answer and sometimes a full explanation.
     """
     full_prompt = f"Your task is {task}\n:{prompt}\n\nInput: {input_text}" if input_text else prompt
 
     outputs = []
     reachabilities = []
     all_logprobs = []
+    output_lengths = []
 
     for i in range(n_runs):
         text, logprobs = _run_with_temperature(full_prompt, backend, temperature)
@@ -166,6 +171,7 @@ def analyze(
         outputs.append(text)
         reachabilities.append(reachability)
         all_logprobs.append(logprobs)
+        output_lengths.append(len(text))
 
         logger.info(
             f"stability run={i+1}/{n_runs} "
@@ -206,12 +212,26 @@ def analyze(
                 certainty=certainty,
             ))
 
+    length_warning = ""
+    if output_lengths:
+        min_len = min(output_lengths)
+        max_len = max(output_lengths)
+        # 3× ratio between shortest and longest output is a strong signal
+        # that the model is switching between terse and verbose response modes
+        if min_len > 0 and max_len / min_len > 3.0:
+            length_warning = (
+                f" ⚠️ Output length varied significantly across runs "
+                f"(min={min_len}, max={max_len} chars). "
+                f"This is usually caused by temperature being too high for this task type. "
+                f"Try lowering the temperature slider to 0.1–0.3 for classify/extract tasks."
+            )
+
     if stability_score >= 0.80:
-        recommendation = "🟢 Prompt is highly stable. Behavior is constrained and ready for production."
+        recommendation = f"🟢 Prompt is highly stable. Behavior is constrained and ready for production.{length_warning}"
     elif stability_score >= 0.60:
-        recommendation = "🟡 Prompt is moderately stable. Consider running an optimization cycle to tighten the constraints."
+        recommendation = f"🟡 Prompt is moderately stable. Consider running an optimization cycle to tighten the constraints.{length_warning}"
     else:
-        recommendation = "🔴 Prompt is unstable. High risk of drift or hallucination. Optimization is strongly recommended."
+        recommendation = f"🔴 Prompt is unstable. High risk of drift or hallucination. Optimization is strongly recommended.{length_warning}"
 
     logger.info(
         f"stability complete "
@@ -228,5 +248,5 @@ def analyze(
         avg_similarity=avg_similarity,
         stability_score=stability_score,
         token_confidence=token_confidence,
-        recommendation=recommendation, # Make sure your StabilityResult dataclass expects this field!
+        recommendation=recommendation,
     )

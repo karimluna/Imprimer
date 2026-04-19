@@ -5,7 +5,9 @@ Three-panel interface: Input, Analysis and Optimization
 import os
 import sys
 import html
+from dotenv import load_dotenv
 
+load_dotenv()
 # SSL workaround for certain environments
 ssl_cert_file = os.environ.get("SSL_CERT_FILE")
 if ssl_cert_file and not os.path.exists(ssl_cert_file):
