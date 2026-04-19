@@ -1,5 +1,5 @@
 """
-LangGraph optimization graph — the outer control loop.
+LangGraph optimization graph, the outer control loop.
 
 Graph structure:
   generator -> evaluator -> controller -> (generator | END)
@@ -26,6 +26,7 @@ from core.optimizer.nodes import (
 from core.chains.prompt_chain import ModelBackend, run_variant
 from core.evaluator.scorer import score as compute_score
 from utils.create_logger import get_logger
+from typing import Generator
 
 logger = get_logger(__name__)
 
@@ -61,14 +62,14 @@ def optimize(
     base_prompt: str,
     input_example: str,
     expected_output: str = "",
-    n_variants: int = 6,
+    n_variants: int = 3,
     n_trials: int = 20,
     backend: ModelBackend = ModelBackend.OLLAMA,
     use_judge: bool = False,
     use_rpe: bool = True,
     target_score: float = 0.80, # we are fine with a better score than the baseline, so just updating it based on that is okay
     max_iterations: int = 5,
-) -> dict:
+) -> Generator[dict, None, None]:
     """
     Entry point for the LangGraph optimization loop.
 
@@ -132,28 +133,69 @@ def optimize(
         "iterations_completed": 0,
     }
 
-    final_state = _graph.invoke(initial_state)
+    if use_rpe == False:
+        final_state = _graph.invoke(initial_state)
 
-    improvement = round(
-        final_state["global_best_score"] - baseline_score, 4
-    )
+        improvement = round(
+            final_state["global_best_score"] - baseline_score, 4
+        )
 
-    logger.info(
-        f"graph complete "
-        f"iterations={final_state.get('current_iteration', 0)} "
-        f"best_reachability={final_state['global_best_reachability']:.4f} "
-        f"target_reached={final_state.get('target_reached', False)} "
-        f"improvement={improvement:+.4f}"
-    )
+        logger.info(
+            f"graph complete "
+            f"iterations={final_state.get('current_iteration', 0)} "
+            f"best_reachability={final_state['global_best_reachability']:.4f} "
+            f"target_reached={final_state.get('target_reached', False)} "
+            f"improvement={improvement:+.4f}"
+        )
 
-    return {
-        "best_prompt": final_state["global_best_prompt"],
-        "best_score": final_state["global_best_score"],
-        "best_reachability": final_state["global_best_reachability"],
-        "baseline_score": baseline_score,
-        "baseline_reachability": baseline_reachability,
-        "improvement": improvement,
-        "iterations_completed": final_state.get("current_iteration", 0),
-        "target_reached": final_state.get("target_reached", False),
-        "feedback": final_state.get("last_feedback", "")
-    }
+        # CHANGED: Use yield instead of return so Python generator semantics don't break
+        yield {
+            "best_prompt": final_state["global_best_prompt"],
+            "best_score": final_state["global_best_score"],
+            "best_reachability": final_state["global_best_reachability"],
+            "baseline_score": baseline_score,
+            "baseline_reachability": baseline_reachability,
+            "improvement": improvement,
+            "iterations_completed": final_state.get("current_iteration", 0),
+            "target_reached": final_state.get("target_reached", False),
+            "feedback": final_state.get("last_feedback", "")
+        }
+        return # Exit the generator early
+
+    else:
+        # dictionary to track the full state across the stream
+        current_full_state = initial_state.copy()
+
+        for event in _graph.stream(initial_state):
+            # event is a dict mapping node_name -> state_update
+            for node_name, state_update in event.items():
+                
+                current_full_state.update(state_update)
+                
+                # we only want to update the UI after a full cycle completes
+                if node_name == "controller":
+                    improvement = round(
+                        current_full_state["global_best_score"] - baseline_score, 4
+                    )
+                    
+                    logger.info(
+                        f"cycle complete "
+                        f"iterations={current_full_state.get('current_iteration', 0)} "
+                        f"best_reachability={current_full_state['global_best_reachability']:.4f} "
+                        f"target_reached={current_full_state.get('target_reached', False)} "
+                        f"improvement={improvement:+.4f}"
+                    )
+
+                    # yield the intermediate state back to Gradio using current_full_state
+                    yield {
+                        "best_prompt": current_full_state["global_best_prompt"],
+                        "best_score": current_full_state["global_best_score"],
+                        "best_reachability": current_full_state["global_best_reachability"],
+                        "baseline_score": baseline_score,
+                        "baseline_reachability": baseline_reachability,
+                        "improvement": improvement,
+                        "current_iteration": current_full_state["current_iteration"],
+                        "iterations_completed": current_full_state.get("iterations_completed", 0),
+                        "target_reached": current_full_state.get("target_reached", False),
+                        "feedback": current_full_state.get("last_feedback", ""),
+                    }
