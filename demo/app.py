@@ -532,7 +532,7 @@ Run Reflective Prompt Optimization inside a LangGraph control loop. The LLM gene
                 fn=run_optimization,
                 inputs=[
                     prompt_input, input_text, task_input, model_id, hf_token,
-                    expected_output, n_variants, target_score, max_iter, False
+                    expected_output, n_variants, target_score, max_iter, gr.State(False)
                 ],
                 outputs=[
                     opt_status_out, opt_metrics_out, opt_timeline_out, opt_prompt_out, opt_feedback_out
