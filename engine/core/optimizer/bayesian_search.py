@@ -251,6 +251,8 @@ PERSONAS = [
     "You are a senior researcher.",
 ]
 
+DIMENSION_SEQUENCE = ["verb", "noun", "modality"]
+
 PRIMING = [
     "",
     "Think carefully before responding.",
