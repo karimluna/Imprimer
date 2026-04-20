@@ -89,7 +89,7 @@ Imprimer is two services connected by a gRPC contract. The proto file is the sin
 
 **Go handles:** HTTP ingress, authentication, audit logging, Prometheus metrics, gRPC routing.
 
-**Python handles:** LLM inference (Ollama, OpenAI, HuggingFace), logprob extraction, reachability computation, LLM-as-judge scoring, Optuna/RPE optimization, injection scanning, registry persistence.
+**Python handles:** LLM inference (Ollama, OpenAI, HuggingFace), logprob extraction, reachability computation, cycle reflections, Optuna/RPE optimization, injection scanning, registry persistence.
 
 **Boundary:** `proto/imprimer.proto`, three RPCs, never more complexity than needed.
 
@@ -106,7 +106,7 @@ Here we can see an example of the capabilities of the platform in simple tasks, 
 
 #### Scoring function
 
-Imprimer uses a **task-aware, backend-adaptive scoring function** that routes through four scenarios depending on what signals are available.
+Imprimer uses a **task-aware, backend-adaptive scoring function** that routes through different scenarios depending on what signals are available.
 
 
 ## Optimization

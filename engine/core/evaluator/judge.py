@@ -1,5 +1,5 @@
 """
-LLM-as-judge scores output quality on a 0.0-1.0 scale.
+LLM-as-judge scores output quality on a 0.0-1.0 scale. Is going to be deprecated in future versions.
 """
 import json
 import re
