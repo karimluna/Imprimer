@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/BalorLC3/Imprimer/gateway/internal/client"
-	"github.com/BalorLC3/Imprimer/gateway/internal/handler"
-	"github.com/BalorLC3/Imprimer/gateway/internal/middleware"
+	"github.com/BalorLC3/imprimer/gateway/internal/client"
+	"github.com/BalorLC3/imprimer/gateway/internal/handler"
+	"github.com/BalorLC3/imprimer/gateway/internal/middleware"
 )
 
 // Imprimer gateway; entry point for all external requests

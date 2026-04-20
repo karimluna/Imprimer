@@ -5,10 +5,10 @@ import (
 	"math"
 	"net/http"
 
-	gen "github.com/BalorLC3/Imprimer/gateway/gen"
-	"github.com/BalorLC3/Imprimer/gateway/internal/client"
-	"github.com/BalorLC3/Imprimer/gateway/internal/httpx"
-	"github.com/BalorLC3/Imprimer/gateway/internal/middleware"
+	gen "github.com/BalorLC3/imprimer/gateway/gen"
+	"github.com/BalorLC3/imprimer/gateway/internal/client"
+	"github.com/BalorLC3/imprimer/gateway/internal/httpx"
+	"github.com/BalorLC3/imprimer/gateway/internal/middleware"
 )
 
 // promptRequest is what called sends in the HTTP body

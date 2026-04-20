@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"strconv"
 
-	gen "github.com/BalorLC3/Imprimer/gateway/gen"
-	"github.com/BalorLC3/Imprimer/gateway/internal/client"
+	gen "github.com/BalorLC3/imprimer/gateway/gen"
+	"github.com/BalorLC3/imprimer/gateway/internal/client"
 )
 
 type BestHandler struct {

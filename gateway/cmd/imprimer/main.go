@@ -1,6 +1,6 @@
 package main
 
-import "github.com/BalorLC3/Imprimer/gateway/internal/cli"
+import "github.com/BalorLC3/imprimer/gateway/internal/cli"
 
 func main() {
 	cli.Execute()

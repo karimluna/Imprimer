@@ -1,4 +1,4 @@
-module github.com/BalorLC3/Imprimer
+module github.com/BalorLC3/imprimer
 
 go 1.25.6
 

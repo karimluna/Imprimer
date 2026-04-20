@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package imprimer;
 
-option go_package = "github.com/BalorLC3/Imprimer/gateway/gen";
+option go_package = "github.com/BalorLC3/imprimer/gateway/gen";
 
 service PromptEngine { // Go calls into Python for this service
     rpc EvaluatePrompt   (EvaluateRequest)  returns (EvaluateResponse);
