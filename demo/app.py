@@ -202,7 +202,7 @@ def run_optimization(
             expected_output=expected_output,
             n_variants=int(n_variants),
             backend=BACKEND_ID,
-            use_judge=bool(use_judge),
+            use_judge=False,
             use_rpe=True,
             target_score=float(target_score), 
             max_iterations=int(max_iterations),
@@ -512,7 +512,6 @@ Run Reflective Prompt Optimization inside a LangGraph control loop. The LLM gene
                 target_score= gr.Slider(minimum=0.5, maximum=0.97, value=0.70, step=0.01, label="Target score")
                 max_iter = gr.Slider(minimum=2, maximum=10, value=3, step=1, label="Max graph iterations")
 
-            use_judge = gr.Checkbox(label="Enable LLM-as-judge scoring (slower, more accurate)", value=False)
             optimize_btn = gr.Button("⚡ Optimize Prompt", variant="primary")
 
             # Mapped exactly to the HTML layout structure
@@ -534,7 +533,7 @@ Run Reflective Prompt Optimization inside a LangGraph control loop. The LLM gene
                 fn=run_optimization,
                 inputs=[
                     prompt_input, input_text, task_input, model_id, hf_token,
-                    expected_output, n_variants, target_score, max_iter, use_judge
+                    expected_output, n_variants, target_score, max_iter, False
                 ],
                 outputs=[
                     opt_status_out, opt_metrics_out, opt_timeline_out, opt_prompt_out, opt_feedback_out
