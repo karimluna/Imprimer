@@ -443,7 +443,7 @@ with gr.Blocks(title="Imprimer - LLM Prompt Control") as demo:
                         model_id = gr.Dropdown(
                             label="Ollama Model",
                             choices=[
-                                "llama3.2:latest",                
+                                "llama3.2",                
                                 "qwen2.5:0.5b",                          
                                 "qwen2.5:1.5b",                        
                             ],
