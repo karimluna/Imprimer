@@ -155,7 +155,11 @@ def score(
                 norm_out = result.text.strip().lower()
                 norm_exp = expected_output.strip().lower()
                 # "Positive" vs "Affirmative" gets sim=0.3 in embeddings, but is functionally correct.
-                similarity_score = 1.0 if norm_exp in norm_out else 0.0
+                if norm_exp in norm_out:
+                    similarity_score = 1.0
+                else:
+                    similarity_score = _similarity(result.text, expected_output)
+
                 
             else:
                 similarity_score = _similarity(result.text, expected_output)

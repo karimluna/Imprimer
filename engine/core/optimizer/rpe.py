@@ -27,7 +27,7 @@ from core.evaluator.scorer import (
     OPEN_ENDED_TASKS, 
     _creative_quality_heuristic
 )
-from core.evaluator.embedder import pairwise_similarity
+from core.evaluator.embedder import pairwise_similarity, similarity
 from utils.create_logger import get_logger
 
 logger = get_logger(__name__)
@@ -277,7 +277,10 @@ def run_rpe(
             norm_out = sample_output.strip().lower()
             norm_exp = expected_output.strip().lower()
             # If expected is "yes", and output is "yes, the child can", sim = 1.0
-            sim = 1.0 if norm_exp in norm_out else 0.0
+            if norm_exp in norm_out:
+                    sim = 1.0
+            else:
+                sim = similarity(result.text, expected_output)
         elif task in OPEN_ENDED_TASKS:
             sim = _creative_quality_heuristic(sample_output)
         elif expected_output:
