@@ -52,11 +52,10 @@ typically converges within 8-10 trials after the initial random exploration.`,
 		expected, _ := cmd.Flags().GetString("expected")
 		trials, _ := cmd.Flags().GetInt32("trials")
 		backend, _ := cmd.Flags().GetString("backend")
-		useJudge, _ := cmd.Flags().GetBool("judge")
 		targetReach, _ := cmd.Flags().GetFloat32("target-reachability")
 		maxIterations, _ := cmd.Flags().GetInt32("max-iterations")
 
-		if task == "" || prompt == "" || input == "" || expected == "" {
+		if task == "" || prompt == "" {
 			return fmt.Errorf("--task, --prompt, --input, and --expected are all required")
 		}
 		if trials <= 0 {
@@ -76,7 +75,6 @@ typically converges within 8-10 trials after the initial random exploration.`,
 			ExpectedOutput:     expected,
 			NTrials:            trials,
 			Backend:            backend,
-			UseJudge:           useJudge,
 			TargetReachability: targetReach,
 			MaxIterations:      maxIterations,
 		}, &result); err != nil {

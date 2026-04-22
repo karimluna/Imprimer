@@ -18,7 +18,7 @@ import requests
 
 from core.optimizer.state import PromptState
 from core.optimizer.bayesian_search import optimize as bayesian_optimize, PERSONAS, DIMENSION_SEQUENCE
-from core.chains.prompt_chain import ModelBackend, run_variant
+from core.chains.prompt_chain import ModelBackend, run_variant, call_llm
 from core.evaluator.scorer import score as compute_score
 from core.registry.prompt_store import OptimizationTrialRecord, save_optimization_trial
 from utils.create_logger import get_logger
@@ -35,55 +35,28 @@ def _generate_feedback(
     backend: ModelBackend,
 ) -> str:
     """
-    Generates a brief verbal explanation of why the prompt succeeded or failed.
+    Generates a brief explanation of why the prompt improved or regressed.
+    Uses call_llm, no template processing needed for internal calls.
     """
-    is_improvement = current_score > base_score
-    
-    if is_improvement:
-        context = "improved the score"
-        instruction = "explain what makes the new version better so we can keep doing it."
-    else:
-        context = "caused the score to drop"
-        instruction = "explain why the new version performed worse so we can avoid this mistake next time."
-
+    direction = "improved" if current_score > base_score else "got worse"
     feedback_prompt = (
-        f"We are optimizing an AI prompt. The previous best prompt scored {base_score:.3f}.\n"
-        f"The new prompt scored {current_score:.3f}, which means it {context}.\n\n"
-        f"  Previous: {base_prompt}\n"
-        f"  New: {current_prompt}\n\n"
-        f"In two sentences, {instruction} "
-        f"Focus on instruction clarity, specificity, or structure. "
-        f"Do not add any preamble."
+        f"We changed an AI prompt and the score {direction} "
+        f"(from {base_score:.3f} to {current_score:.3f}).\n\n"
+        f"Old: {base_prompt}\n"
+        f"New: {current_prompt}\n\n"
+        f"In two sentences, explain why. Focus on clarity, specificity, or structure. "
+        f"No preamble."
     )
 
     try:
-        if backend == ModelBackend.OLLAMA:
-            base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-            model = os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b")
-            resp = requests.post(
-                f"{base_url}/api/chat",
-                json={
-                    "model": model,
-                    "messages": [{"role": "user", "content": feedback_prompt}],
-                    "stream": False,
-                    "options": {"temperature": 0.3},
-                },
-                timeout=30,
-            )
-            resp.raise_for_status()
-            return resp.json().get("message", {}).get("content", "").strip()
-
-        elif backend == ModelBackend.OPENAI:
-            from core.chains.prompt_chain import _build_openai_llm
-            llm = _build_openai_llm()
-            response = llm.invoke(feedback_prompt)
-            return response.content.strip()
-
-        else:
-            return ""
-
+        return call_llm(
+            prompt_text=feedback_prompt,
+            backend=backend,
+            temperature=0.3,
+            max_tokens=120,
+        )
     except Exception as e:
-        logger.warning(f"feedback generation failed, skipping: {e}")
+        logger.warning(f"feedback generation failed: {e}")
         return ""
 
 
@@ -199,14 +172,13 @@ def evaluator_node(state: PromptState) -> dict:
     )
 
     # skip judge in iteration 0 to save calls
-    _use_judge = False if iteration == 0 else state['use_judge']
 
     s = compute_score(
         result=result,
+        baseline_result=None,
         task=state["task"],
         input_text=state["input_example"],
         expected_output=state["expected_output"],
-        use_judge=_use_judge,
         backend=backend,
     )
 

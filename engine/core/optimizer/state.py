@@ -12,7 +12,6 @@ class PromptState(TypedDict):
     input_example: str
     expected_output: str
     backend: str           # always a string (ModelBackend.value), never the enum
-    use_judge: bool
     base_prompt: str       # immutable anchor, generator always reads this
     use_rpe: bool          # true: RPE / false: Bayesian search
 

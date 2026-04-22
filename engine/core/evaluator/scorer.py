@@ -132,12 +132,7 @@ def score(
     quality_score = 0.5
     similarity_score = 0.0
 
-    if use_judge and task and input_text:
-        # Scenario A: judge handles it intelligently (Best for creative/complex tasks)
-        from core.evaluator.judge import judge
-        quality_score = judge(task=task, input_text=input_text, output=result.text, backend=backend)
-        
-    elif task in OPEN_ENDED_TASKS:
+    if task in OPEN_ENDED_TASKS:
         if result.logprobs:
             # Scenario B: creative task with logprobs. 
             # Max out quality and let the optimizer focus entirely on reachability (confidence).

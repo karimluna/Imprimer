@@ -41,10 +41,9 @@ var evaluateCmd = &cobra.Command{
 		variantA, _ := cmd.Flags().GetString("a")
 		variantB, _ := cmd.Flags().GetString("b")
 		backend, _ := cmd.Flags().GetString("backend")
-		useJudge, _ := cmd.Flags().GetBool("judge")
 
-		if task == "" || input == "" || variantA == "" || variantB == "" {
-			return fmt.Errorf("--task, --input, --a, and --b are all required")
+		if task == "" || variantA == "" || variantB == "" {
+			return fmt.Errorf("--task, --a, and --b are all required")
 		}
 
 		c := NewImprimerClient(gatewayURL, apiKey)
@@ -56,7 +55,6 @@ var evaluateCmd = &cobra.Command{
 			VariantA: variantA,
 			VariantB: variantB,
 			Backend:  backend,
-			UseJudge: useJudge,
 		}, &result); err != nil {
 			return err
 		}
@@ -85,7 +83,6 @@ func init() {
 	evaluateCmd.Flags().String("a", "", "First prompt template (use {input} as placeholder)")
 	evaluateCmd.Flags().String("b", "", "Second prompt template (use {input} as placeholder)")
 	evaluateCmd.Flags().String("backend", "ollama", "Model backend: ollama or openai")
-	evaluateCmd.Flags().Bool("judge", false, "Enables LLM-as-judge scoring (costs one extra LLM call per variant)")
 
 	RootCmd.AddCommand(evaluateCmd)
 }

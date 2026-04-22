@@ -21,7 +21,11 @@ from dataclasses import dataclass, field
 import os
 from typing import Optional
 
-from core.chains.prompt_chain import ModelBackend, run_variants_parallel
+from core.chains.prompt_chain import (
+    ModelBackend, 
+    run_variants_parallel,
+    call_llm
+)
 from core.evaluator.scorer import (
     _compute_reachability, 
     OPEN_ENDED_TASKS, 
@@ -55,110 +59,80 @@ def _generate_variants(
     current_best_prompt: Optional[str] = None,
 ) -> list[str]:
     """
-    Verbalized sampling, asks the LLM to generate N improved prompt variants.
+    Asks the LLM to generate N improved variants of the anchor prompt.
 
-    The LLM receives the CURRENT BEST prompt (not the frozen original) and
-    verbal feedback from the previous iteration. This ensures each RPE cycle
-    genuinely builds on prior gains rather than restarting from scratch.
-
-    Enforces micro-mutations to prevent over-mutation and reachability collapse.
+    Prompt is intentionally short and concrete — small models (1.5B) fail
+    on long instructions with technical strategy names. "Change one thing"
+    is clearer than "Apply EXACTLY ONE micro-mutation strategy."
     """
-    # Use the evolving best prompt as the anchor, fall back to base_prompt
-    anchor_prompt = current_best_prompt if current_best_prompt else base_prompt
+    anchor = current_best_prompt if current_best_prompt else base_prompt
 
-    feedback_section = (
-        f"\nCRITICAL FEEDBACK FROM PREVIOUS ROUND:\n{feedback}\n\n"
-        f"You MUST address the issues mentioned in the feedback using one of the allowed strategies."
+    feedback_line = (
+        f"\nPrevious feedback: {feedback}\n"
         if feedback else ""
     )
-    
-    example_array_str = "[" + ", ".join([f'"variant {i+1}"' for i in range(n_variants)]) + "]"
-    
-    # FIX: Strict micro-mutation prompt to prevent wild overhauls that destroy reachability
-    generation_prompt = f"""You are a precise prompt engineer. Your goal is to improve the anchor prompt by applying exactly ONE micro-mutation per variant.
 
-TASK: {task}
-ANCHOR PROMPT:
-{anchor_prompt}
-{feedback_section}
+    # Short, concrete, no jargon for small models
+    generation_prompt = (
+        f"Improve this AI prompt for the task: {task}\n\n"
+        f"Current prompt:\n{anchor}\n"
+        f"{feedback_line}\n"
+        f"Write {n_variants} improved versions. Rules:\n"
+        f"- Keep {{input}} exactly as written\n"
+        f"- Change only one thing per version: wording, tone, or instruction style\n"
+        f"- No explanations\n\n"
+        f'Return as JSON array: ["version 1", "version 2", ...]'
+    )
 
-RULES:
-1. Do NOT change the core task or meaning.
-2. Do NOT remove any existing constraints from the anchor prompt.
-3. Apply EXACTLY ONE of the following micro-mutation strategies to each variant:
-   - STRATEGY A: Change the root verb (for example: 'Determine' -> 'Assess', 'Identify', 'Classify').
-   - STRATEGY B: Add a formatting constraint (for example: 'Reply with only one word', 'Output strictly in JSON').
-   - STRATEGY C: Add a persona (for example: 'You are an expert linguist...', 'Act as a strict classifier...').
-   - STRATEGY D: Clarify the audience or domain (for example: 'for a 10-year-old' instead of 'for a child').
-4. You MUST preserve the `{{{{input}}}}` placeholder exactly as-is.
-5. Do not add explanations, just the variants.
-
-Generate exactly {n_variants} micro-mutated variants.
-Respond with ONLY a JSON array of strings containing exactly {n_variants} variants, no markdown:
-{example_array_str}"""
-    
     raw = ""
     try:
-        if backend == ModelBackend.OLLAMA:
-            base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-            model = os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b")
-            resp = requests.post(
-                f"{base_url}/api/chat",
-                json={
-                    "model": model,
-                    "messages": [{"role": "user", "content": generation_prompt}],
-                    "stream": False,
-                    "options": {"temperature": 0.7, "num_predict": 300},
-                },
-                timeout=60,
-            )
-            resp.raise_for_status()
-            raw = resp.json().get("message", {}).get("content", "")
+        raw = call_llm(
+            prompt_text=generation_prompt,
+            backend=backend,
+            temperature=0.7,
+            max_tokens=400,
+        )
 
-        elif backend == ModelBackend.OPENAI:
-            from core.chains.prompt_chain import _build_openai_llm
-            llm = _build_openai_llm()
-            response = llm.invoke(generation_prompt)
-            raw = response.content
-
-        elif backend == ModelBackend.HUGGINGFACE:
-            from huggingface_hub import InferenceClient
-            client = InferenceClient(
-                model=os.getenv("HF_MODEL_ID", "meta-llama/Meta-Llama-3-8B-Instruct"),
-                token=os.getenv("HF_TOKEN"),
-            )
-            response = client.chat_completion(
-                messages=[{"role": "user", "content": generation_prompt}],
-                temperature=0.7,
-                max_tokens=300,
-            )
-            raw = response.choices[0].message.content
-
-        # parses JSON array from response
+        # Try strict JSON parse first
         cleaned = re.sub(r'```json\s*', '', raw)
         cleaned = re.sub(r'```\s*', '', cleaned).strip()
-        match = re.search(r'\[.*\]', cleaned, re.DOTALL)
+        match = re.search(r'\[.*?\]', cleaned, re.DOTALL)
         if match:
             try:
-                decoder = json.JSONDecoder()
-                variants, _ = decoder.raw_decode(match.group())
+                variants = json.loads(match.group())
+                valid = [v for v in variants if isinstance(v, str) and v.strip()]
+                if valid:
+                    logger.info(f"generated {len(valid)} valid variants (JSON)")
+                    return valid[:n_variants]
             except json.JSONDecodeError:
-                variants = []
-                
-            valid = [v for v in variants if isinstance(v, str) and v.strip()]
-            if valid:
-                logger.info(f"generated {len(valid)} valid variants")
-                return valid[:n_variants]
-        else:
-            logger.warning(
-                f"variant generation failed to output an array. Raw output: {raw[:60]}... "
-                f"using current best prompt"
-            )
+                pass
+
+        # Fallback: extract quoted strings line by line
+        # Handles cases where the model returns "1. "prompt here"" or similar
+        quoted = re.findall(r'"([^"]{10,})"', cleaned)
+        valid = [v for v in quoted if v.strip() and v != anchor]
+        if valid:
+            logger.info(f"generated {len(valid)} valid variants (quoted fallback)")
+            return valid[:n_variants]
+
+        # Last fallback: non-empty lines that look like prompts
+        lines = [
+            l.strip().lstrip("0123456789.-) ")
+            for l in cleaned.splitlines()
+            if len(l.strip()) > 15
+        ]
+        valid = [l for l in lines if l and l != anchor]
+        if valid:
+            logger.info(f"generated {len(valid)} valid variants (line fallback)")
+            return valid[:n_variants]
 
     except Exception as e:
-        logger.warning(f"variant generation failed: {e}, using current best prompt")
+        logger.warning(f"variant generation failed: {e} — using anchor prompt")
 
-    return [anchor_prompt]
+    if raw:
+        logger.warning(f"all parsers failed. Raw: {raw[:120]}")
+
+    return [anchor]
 
 
 def _compute_ssc(

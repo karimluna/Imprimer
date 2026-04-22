@@ -62,12 +62,11 @@ _graph = _build_graph()
 def optimize(
     task: str,
     base_prompt: str,
-    input_example: str,
+    input_example: str = "",
     expected_output: str = "",
     n_variants: int = 3,
     n_trials: int = 20,
     backend: ModelBackend = ModelBackend.OLLAMA,
-    use_judge: bool = False,
     use_rpe: bool = True,
     target_score: float = 0.70, 
     max_iterations: int = 5,
@@ -93,7 +92,6 @@ def optimize(
         task=task,
         input_text=input_example,
         expected_output=expected_output,
-        use_judge=use_judge,
         backend=backend,
     )
     baseline_score = baseline_score_obj.combined
@@ -113,7 +111,6 @@ def optimize(
         "input_example": input_example,
         "expected_output": expected_output,
         "backend": backend_str,
-        "use_judge": use_judge,
         "use_rpe": use_rpe,
         "base_prompt": base_prompt,
         "current_prompt": base_prompt,

@@ -40,7 +40,7 @@ TASK_CATEGORIES = [
     "qa"
 ]
 
-BACKEND_ID = ModelBackend.HUGGINGFACE # harcoded backend for dev and demo, change to OLLAMA for local usage
+BACKEND_ID = ModelBackend.OLLAMA # harcoded backend for dev and demo, change to OLLAMA for local usage
 BEST_PROMPT = []
 
 

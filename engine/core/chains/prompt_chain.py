@@ -45,14 +45,11 @@ class VariantResult:
     latency_ms: float
     logprobs: list = field(default_factory=list)
 
+
 def _normalize_template(template: str) -> str:
     """
-    Ensures the {input} placeholder exists in the template.
-    If the user forgot it, automatically append it to the end.
+    Ensures {input} placeholder exists only when the template needs it.
     """
-    if "{input}" not in template:
-        # Append it cleanly with a separator
-        return f"{template.strip()}\n\n{{input}}"
     return template
 
 
@@ -234,11 +231,58 @@ def run_variants_parallel(
     return results
 
 
+def call_llm(
+    prompt_text: str,
+    backend: ModelBackend,
+    temperature: float = 0.3,
+    max_tokens: int = 300,
+) -> str:
+    """
+    Minimal LLM call for internal use: variant generation, feedback, judge.
+    Returns plain text. No template processing, no caching, no logprobs.
+    """
+    if backend == ModelBackend.OLLAMA:
+        base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        model = os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b")
+        resp = requests.post(
+            f"{base_url}/api/chat",
+            json={
+                "model": model,
+                "messages": [{"role": "user", "content": prompt_text}],
+                "stream": False,
+                "options": {"temperature": temperature, "num_predict": max_tokens},
+            },
+            timeout=60,
+        )
+        resp.raise_for_status()
+        return resp.json().get("message", {}).get("content", "").strip()
+
+    elif backend == ModelBackend.OPENAI:
+        from langchain_openai import ChatOpenAI
+        llm = ChatOpenAI(
+            model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+            temperature=temperature,
+            api_key=os.getenv("OPENAI_API_KEY"),
+        )
+        return llm.invoke(prompt_text).content.strip()
+
+    elif backend == ModelBackend.HUGGINGFACE:
+        client = _build_huggingface_llm()
+        response = client.chat_completion(
+            messages=[{"role": "user", "content": prompt_text}],
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        return response.choices[0].message.content.strip()
+
+    raise ValueError(f"Unknown backend: {backend}")
+
+
 def run_variant(
     template: str,
-    input_text: str,
-    task: str,
-    backend: ModelBackend,
+    input_text: str = "",
+    task: str = "",
+    backend: ModelBackend = ModelBackend.OLLAMA,
     temperature: float = 0.0,
     use_cache: bool = True
 ) -> VariantResult:
@@ -264,17 +308,19 @@ def run_variant(
     if use_cache and temperature ==0.0 and key in _VARIANT_CACHE:
         return _VARIANT_CACHE[key]
     
-    safe_template = _normalize_template(template) # normalizing to ensure {input} exists
+    if "{input}" in template:
+        safe_template = _normalize_template(template) # normalizing to ensure {input} exists
 
-    prompt = PromptTemplate(
-        template=safe_template,
-        input_variables=["task", "input"]
-    )
+        prompt = PromptTemplate(
+            template=safe_template,
+            input_variables=["task", "input"],
+        )
+        rendered = prompt.format(task=task, input=input_text)
+    else: 
+        # template does not use {input}, render as is
+        rendered = template.format(task=task) if "{task}" in template else template
 
     max_tokens = TASK_MAX_TOKENS.get(task, 150)
-    # Render the prompt template to a plain string for Ollama
-    # (Ollama's /api/generate expects a string, not a message list)
-    rendered = prompt.format(task=task, input=input_text)
 
     if backend == ModelBackend.OLLAMA:
         result = _run_ollama(prompt_text=rendered, temperature=temperature, max_tokens=max_tokens)
