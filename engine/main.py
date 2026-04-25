@@ -151,7 +151,6 @@ class PromptEngineServicer(imprimer_pb2_grpc.PromptEngineServicer):
 
         return imprimer_pb2.BestResponse(
             task=result["task"],
-            best_template=result["best_template"],
             avg_reachability=result["avg_reachability"],
             avg_score=result["avg_score"],
             evaluations=result["evaluations_sampled"],
@@ -161,10 +160,8 @@ class PromptEngineServicer(imprimer_pb2_grpc.PromptEngineServicer):
     def OptimizePrompt(self, request, context):
         logger.info(
             f"optimize task={request.task} "
-            f"n_trials={request.n_trials} "
             f"max_iterations={request.max_iterations} "
-            f"target_reachability={request.target_reachability} "
-            f"use_judge={request.use_judge}"
+            f"target_score={request.target_score} "
         )
 
         backend_str = request.backend.lower() if request.backend else "ollama"
@@ -185,10 +182,8 @@ class PromptEngineServicer(imprimer_pb2_grpc.PromptEngineServicer):
             base_prompt=request.base_prompt,
             input_example=request.input_example,
             expected_output=request.expected_output,
-            n_trials=request.n_trials if request.n_trials > 0 else 20,
-            backend=backend,
-            use_judge=request.use_judge,
-            use_rpe=False,
+            n_variants=request.n_variants,
+            backend=request.backend,
             target_reachability=request.target_reachability or 0.80,
             max_iterations=request.max_iterations if request.max_iterations > 0 else 3,
         )
@@ -200,7 +195,6 @@ class PromptEngineServicer(imprimer_pb2_grpc.PromptEngineServicer):
             baseline_score=result["baseline_score"],
             baseline_reachability=result["baseline_reachability"],
             improvement=result["improvement"],
-            trials_run=result["trials_run"],
             iterations_completed=result["iterations_completed"],
             target_reached=result["target_reached"],
         )

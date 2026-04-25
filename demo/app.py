@@ -167,12 +167,10 @@ def run_optimization(
     input_text,
     task,
     model_id,
-    hf_token,
     expected_output,
     n_variants,
     target_score,
     max_iterations,
-    use_judge,
 ):
     global BEST_PROMPT
     if not prompt or not task:
@@ -185,13 +183,8 @@ def run_optimization(
         )
         return
 
-    # Backend environment setup
-    if BACKEND_ID == ModelBackend.HUGGINGFACE:
-        if model_id:
-            os.environ["HF_MODEL_ID"] = model_id
-        if hf_token:
-            os.environ["HF_TOKEN"] = hf_token
-    elif BACKEND_ID == ModelBackend.OLLAMA:
+
+    if BACKEND_ID == ModelBackend.OLLAMA:
         if model_id:
             os.environ["OLLAMA_MODEL"] = model_id
 
@@ -224,8 +217,6 @@ def run_optimization(
             expected_output=expected_output,
             n_variants=int(n_variants),
             backend=BACKEND_ID,
-            use_judge=False,  # deprecated: in further updates this is going to be removed for redundancy
-            use_rpe=True,
             target_score=float(target_score),
             max_iterations=int(max_iterations),
         )
@@ -350,7 +341,7 @@ def run_optimization(
     yield status_html, metrics_html, tl, prompt_html, feedback_html
 
 
-def run_analysis(prompt, input_text, task, model_id, hf_token, n_runs, temperature):
+def run_analysis(prompt, input_text, task, model_id, n_runs, temperature):
 
     if not prompt or not task:
         return (
@@ -362,10 +353,6 @@ def run_analysis(prompt, input_text, task, model_id, hf_token, n_runs, temperatu
             None,
         )
 
-    if model_id:
-        os.environ["HF_MODEL_ID"] = model_id
-    if hf_token:
-        os.environ["HF_TOKEN"] = hf_token
 
     try:
         result = run_stability(
@@ -440,11 +427,6 @@ def query_best(task, limit):
         return str(e)
 
 
-# Models confirmed available on HF free serverless inference API
-# Source: https://huggingface.co/inference/models
-HF_FREE_MODELS = [
-    "meta-llama/Llama-3.2-1B-Instruct",
-]
 
 with gr.Blocks(title="Imprimer - LLM Prompt Control") as demo:
     gr.Markdown("""
@@ -477,32 +459,19 @@ with gr.Blocks(title="Imprimer - LLM Prompt Control") as demo:
 
             with gr.Row():
                 try:
-                    if BACKEND_ID == ModelBackend.HUGGINGFACE:
-                        model_id = gr.Dropdown(
-                            label="Hugging Face Model ID",
-                            choices=HF_FREE_MODELS,
-                            value=HF_FREE_MODELS[0],
-                            allow_custom_value=True,
-                        )
-                    else:
-                        model_id = gr.Dropdown(
-                            label="Ollama Model",
-                            choices=[
-                                "llama3.2",
-                                "qwen2.5:0.5b",
-                                "qwen2.5:1.5b",
-                            ],
-                            value="qwen2.5:1.5b",
-                            allow_custom_value=True,
-                        )
+                    model_id = gr.Dropdown(
+                        label="Ollama Model",
+                        choices=[
+                            "llama3.2",
+                            "qwen2.5:0.5b",
+                            "qwen2.5:1.5b",
+                        ],
+                        value="qwen2.5:1.5b",
+                        allow_custom_value=True,
+                    )
                 except Exception as e:
                     raise f"No backend supported {e}"
 
-                hf_token = gr.Textbox(
-                    label="HF Token",
-                    placeholder="hf_...",
-                    type="password",
-                )
 
     gr.Markdown("---")
 
@@ -542,7 +511,6 @@ with gr.Blocks(title="Imprimer - LLM Prompt Control") as demo:
                     input_text,
                     task_input,
                     model_id,
-                    hf_token,
                     n_runs,
                     temperature,
                 ],
@@ -611,12 +579,10 @@ Run Reflective Prompt Optimization inside a LangGraph control loop. The LLM gene
                     input_text,
                     task_input,
                     model_id,
-                    hf_token,
                     expected_output,
                     n_variants,
                     target_score,
                     max_iter,
-                    gr.State(False),
                 ],
                 outputs=[
                     opt_status_out,

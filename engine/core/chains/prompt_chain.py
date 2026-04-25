@@ -2,41 +2,37 @@ from dataclasses import dataclass, field
 from enum import Enum
 import time
 import os
-import requests
 import hashlib
 import json
-
-
-from langchain_core.prompts import PromptTemplate  # to rid off i/o bounding in ollama
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from utils.create_logger import get_logger
 
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import HumanMessage
+from utils.create_logger import get_logger
 
 logger = get_logger(__name__)
 
 
-TASK_MAX_TOKENS = {
-    "classify": 10,
-    "extract": 50,
-    "summarize": 100,
-    "reasoning": 150,
+# Task token budgets are what we use to control they system
+TASK_MAX_TOKENS: dict[str, int] = {
+    "classify":       10, 
+    "extract":        50,
+    "summarize":     100,
+    "reasoning":     150,
     "creative_writing": 500,
     "code_generation": 300,
-    "rewrite": 100,
-    "roleplay": 150,
-    "qa": 50,
-    "translate": 150,
+    "rewrite":       100,
+    "roleplay":      150,
+    "qa":             50,
+    "translate":     150,
 }
 
-
-_VARIANT_CACHE = {}
+_VARIANT_CACHE: dict = {}
 
 
 class ModelBackend(Enum):
     OPENAI = "openai"
     OLLAMA = "ollama"
-    HUGGINGFACE = "huggingface"
-    # ... further compability is easy to add
 
 
 @dataclass
@@ -46,29 +42,50 @@ class VariantResult:
     logprobs: list = field(default_factory=list)
 
 
-def _normalize_template(template: str) -> str:
+def _build_chat_client(
+    backend: ModelBackend,
+    temperature: float = 0.0,
+    max_tokens: int = 150,
+    with_logprobs: bool = True,
+) -> ChatOpenAI:
     """
-    Ensures {input} placeholder exists only when the template needs it.
+    Single factory for both OpenAI and Ollama.
+
+    Ollama serves the OpenAI-compatible API at <base_url>/v1.
+    Passing api_key="ollama" satisfies the SDK requirement; Ollama ignores it.
     """
-    return template
-
-
-def _build_openai_llm():
-    from langchain_openai import ChatOpenAI
-
-    return ChatOpenAI(
-        model=os.getenv("OPENAI_MODEL"),
-        temperature=0,
-        logprobs=True,
-        top_logprobs=5,
-        api_key=os.getenv("OPENAI_API_KEY"),
+    logprob_kwargs = (
+        {"logprobs": True, "top_logprobs": 5} if with_logprobs else {}
     )
 
+    if backend == ModelBackend.OLLAMA:
+        base = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+        return ChatOpenAI(
+            model=os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b"),
+            base_url=f"{base}/v1",
+            api_key="ollama",  # Required by the SDK, not validated by Ollama
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **logprob_kwargs,
+        )
 
-def _extract_openai_logprobs(response) -> list:
+    if backend == ModelBackend.OPENAI:
+        return ChatOpenAI(
+            model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+            api_key=os.getenv("OPENAI_API_KEY"),
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **logprob_kwargs,
+        )
+
+    raise ValueError(f"Unknown backend: {backend!r}")
+
+
+def _extract_logprobs(response) -> list:
     """
-    Extracts logprobs from a LangChain OpenAI response.
-    Returns a list of dicts with 'token', 'logprob', and 'top' keys.
+    Extracts logprobs from a LangChain ChatOpenAI response.
+    Compatible with both OpenAI and Ollama (OpenAI-compat) responses.
+    Returns [] gracefully when the backend does not return logprob data.
     """
     try:
         lp_content = response.response_metadata.get("logprobs", {})
@@ -89,198 +106,15 @@ def _extract_openai_logprobs(response) -> list:
         return []
 
 
-def _build_huggingface_llm():
-    """
-    Builds and returns a reusable Hugging Face InferenceClient.
-    Defaults to Zephyr or Llama-3, which are free on the Serverless API.
-    """
-    from huggingface_hub import InferenceClient
-
-    token = os.getenv("HF_TOKEN")
-    if not token:
-        raise RuntimeError("HF_TOKEN is not set in your environment.")
-
-    model_id = os.getenv("HF_MODEL_ID", "meta-llama/Meta-Llama-3-8B-Instruct")
-
-    # We bind the model ID to the client here, so it acts just like your OpenAI llm object
-    return InferenceClient(model=model_id, token=token)
-
-
-def _extract_hf_api_logprobs(response) -> list:
-    """
-    Extracts logprobs from the Hugging Face API ChatCompletion response.
-    Returns [] safely if the response doesn't contain logprob data or if
-    the model/provider doesn't support logprobs.
-    """
-    try:
-        lp_content = response.choices[0].logprobs.content
-        if not lp_content:
-            return []
-
-        return [
-            {
-                "token": td.token,
-                "logprob": td.logprob,
-                "top": [
-                    {"token": t.token, "logprob": t.logprob}
-                    for t in getattr(td, "top_logprobs", [])
-                ],
-            }
-            for td in lp_content
-        ]
-    except (AttributeError, KeyError, TypeError, IndexError):
-        return []
-
-
-def _run_ollama(
-    prompt_text: str, temperature: float = 0.0, max_tokens: int = 150
-) -> VariantResult:
-    """
-    Calls Ollama /api/chat with logprobs enabled.
-
-    We normalize this into the same shape as the OpenAI extractor
-    so the scorer receives identical input regardless of backend.
-    """
-    base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-    model = os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b")
-
-    if not model:
-        raise RuntimeError(
-            "OLLAMA_MODEL is not configured. Set OLLAMA_MODEL to a loaded model "
-            "such as 'qwen2.5:1.5b'."
-        )
-
-    payload = {
-        "model": model,
-        "messages": [{"role": "user", "content": prompt_text}],
-        "stream": False,
-        "logprobs": True,
-        "top_logprobs": 5,
-        "options": {
-            "temperature": temperature,
-            "top_p": 0.95,
-            "top_k": 50,
-            "num_predict": max_tokens,
-        },
-    }
-
-    start = time.time()
-    resp = requests.post(
-        f"{base_url}/api/chat",
-        json=payload,
-        timeout=60,
-    )
-    resp.raise_for_status()
-    elapsed_ms = (time.time() - start) * 1000
-
-    data = resp.json()
-
-    # Text lives under message.content in /api/chat
-    text = data.get("message", {}).get("content", "")
-
-    # Logprobs are at the top level
-    raw = data.get("logprobs") or []
-    logprobs = [
-        {
-            "token": entry.get("token", ""),
-            "logprob": entry.get("logprob", -10.0),
-            "top": [
-                {"token": t["token"], "logprob": t["logprob"]}
-                for t in entry.get("top_logprobs", [])
-            ],
-        }
-        for entry in raw
-    ]
-
-    return VariantResult(
-        text=text,
-        latency_ms=round(elapsed_ms, 2),
-        logprobs=logprobs,
-    )
-
-
-def run_variants_parallel(
-    templates: list[str],
-    input_text: str,
-    task: str,
-    backend: ModelBackend,
-    max_workers: int = 4,
-    temperature: float = 0.0,
-) -> list[VariantResult]:
-    """
-    Executes multiple prompt variants in parallel using threads.
-    Bypasses GIL since requests.post is I/O bound.
-    """
-    results = [None] * len(templates)
-
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Submit all jobs to the thread pool
-        future_to_index = {
-            executor.submit(
-                run_variant, tpl, input_text, task, backend, temperature
-            ): idx
-            for idx, tpl in enumerate(templates)
-        }
-
-        # Collect results as they complete
-        for future in as_completed(future_to_index):
-            idx = future_to_index[future]
-            try:
-                results[idx] = future.result()
-            except Exception as e:
-                logger.error(f"parallel variant failed: {e}")
-                # Fallback to a failed result so the list maintains order
-                results[idx] = VariantResult(text="", latency_ms=0, logprobs=[])
-
-    return results
-
-
-def call_llm(
-    prompt_text: str,
-    backend: ModelBackend,
-    temperature: float = 0.3,
-    max_tokens: int = 300,
-) -> str:
-    """
-    Minimal LLM call for internal use: variant generation, feedback, judge.
-    Returns plain text. No template processing, no caching, no logprobs.
-    """
-    if backend == ModelBackend.OLLAMA:
-        base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-        model = os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b")
-        resp = requests.post(
-            f"{base_url}/api/chat",
-            json={
-                "model": model,
-                "messages": [{"role": "user", "content": prompt_text}],
-                "stream": False,
-                "options": {"temperature": temperature, "num_predict": max_tokens},
-            },
-            timeout=60,
-        )
-        resp.raise_for_status()
-        return resp.json().get("message", {}).get("content", "").strip()
-
-    elif backend == ModelBackend.OPENAI:
-        from langchain_openai import ChatOpenAI
-
-        llm = ChatOpenAI(
-            model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-            temperature=temperature,
-            api_key=os.getenv("OPENAI_API_KEY"),
-        )
-        return llm.invoke(prompt_text).content.strip()
-
-    elif backend == ModelBackend.HUGGINGFACE:
-        client = _build_huggingface_llm()
-        response = client.chat_completion(
-            messages=[{"role": "user", "content": prompt_text}],
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
-        return response.choices[0].message.content.strip()
-
-    raise ValueError(f"Unknown backend: {backend}")
+def _render_prompt(template: str, task: str, input_text: str) -> str:
+    """Renders {input} and {task} placeholders in a prompt template."""
+    if "{input}" in template and "{task}" in template:
+        return template.format(task=task, input=input_text)
+    if "{input}" in template:
+        return template.replace("{input}", input_text)
+    if "{task}" in template:
+        return template.replace("{task}", task)
+    return template
 
 
 def run_variant(
@@ -292,13 +126,14 @@ def run_variant(
     use_cache: bool = True,
 ) -> VariantResult:
     """
-    Runs one prompt variant and returns what the model produced.
+    Runs one prompt variant and returns the model output with logprobs.
 
-    Backend selection becomes purely a data sovereignty decision:
-      OLLAMA      - data never leaves the machine, full logprobs
-      OPENAI      - external API, full logprobs, stronger base model
-      HUGGINGFACE - external API, logprobs when supported by provider
+    Backend selection:
+      OLLAMA  - data stays local, logprobs via OpenAI-compat API
+      OPENAI  - external API, logprobs natively supported
 
+    Falls back to empty logprobs gracefully; the scorer handles this with
+    a neutral 0.5 reachability.
     """
     cache_state = json.dumps(
         {
@@ -310,71 +145,85 @@ def run_variant(
         },
         sort_keys=True,
     )
-
-    key = hashlib.sha256(cache_state.encode("utf-8")).hexdigest()
+    key = hashlib.sha256(cache_state.encode()).hexdigest()
 
     if use_cache and temperature == 0.0 and key in _VARIANT_CACHE:
         return _VARIANT_CACHE[key]
 
-    if "{input}" in template:
-        safe_template = _normalize_template(
-            template
-        )  # normalizing to ensure {input} exists
-
-        prompt = PromptTemplate(
-            template=safe_template,
-            input_variables=["task", "input"],
-        )
-        rendered = prompt.format(task=task, input=input_text)
-    else:
-        # template does not use {input}, render as is
-        rendered = template.format(task=task) if "{task}" in template else template
-
+    rendered = _render_prompt(template, task, input_text)
     max_tokens = TASK_MAX_TOKENS.get(task, 150)
 
-    if backend == ModelBackend.OLLAMA:
-        result = _run_ollama(
-            prompt_text=rendered, temperature=temperature, max_tokens=max_tokens
+    try:
+        llm = _build_chat_client(
+            backend, temperature=temperature, max_tokens=max_tokens, with_logprobs=True
         )
-
-    elif backend == ModelBackend.OPENAI:
-        llm = _build_openai_llm()
-        chain = prompt | llm
         start = time.time()
-        response = chain.invoke({"task": task, "input": input_text})
-        elapsed_ms = (time.time() - start) * 1000
+        response = llm.invoke([HumanMessage(content=rendered)])
+        elapsed_ms = round((time.time() - start) * 1000, 2)
         result = VariantResult(
-            text=response.content,
-            latency_ms=round(elapsed_ms, 2),
-            logprobs=_extract_openai_logprobs(response),
+            text=response.content.strip(),
+            latency_ms=elapsed_ms,
+            logprobs=_extract_logprobs(response),
         )
+    except Exception as exc:
+        logger.error(f"run_variant failed backend={backend.value} task={task}: {exc}")
+        result = VariantResult(text="", latency_ms=0.0, logprobs=[])
 
-    elif backend == ModelBackend.HUGGINGFACE:
-        client = _build_huggingface_llm()
-
-        start = time.time()
-        response = client.chat_completion(
-            messages=[{"role": "user", "content": rendered}],
-            max_tokens=max_tokens,
-            temperature=temperature,
-            logprobs=True,
-            top_logprobs=5,
-        )
-        elapsed_ms = (time.time() - start) * 1000
-
-        text = response.choices[0].message.content
-
-        result = VariantResult(
-            text=text,
-            latency_ms=round(elapsed_ms, 2),
-            logprobs=_extract_hf_api_logprobs(response),
-        )
-
-    else:
-        raise ValueError(f"Unknown backend: {backend}")
-
-    # caching to avoid trials and iterations
-    # fix: only cache deterministic calls
     if use_cache and temperature == 0.0:
         _VARIANT_CACHE[key] = result
+
     return result
+
+
+def run_variants_parallel(
+    templates: list[str],
+    input_text: str,
+    task: str,
+    backend: ModelBackend,
+    max_workers: int = 4,
+    temperature: float = 0.0,
+) -> list[VariantResult]:
+    """
+    Executes multiple prompt variants in parallel.
+    I/O-bound, so threads are appropriate here.
+    """
+    results: list[VariantResult | None] = [None] * len(templates)
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_index = {
+            executor.submit(run_variant, tpl, input_text, task, backend, temperature): idx
+            for idx, tpl in enumerate(templates)
+        }
+        for future in as_completed(future_to_index):
+            idx = future_to_index[future]
+            try:
+                results[idx] = future.result()
+            except Exception as e:
+                logger.error(f"parallel variant {idx} failed: {e}")
+                results[idx] = VariantResult(text="", latency_ms=0.0, logprobs=[])
+
+    return results  # type: ignore[return-value]
+
+
+def call_llm(
+    prompt_text: str,
+    backend: ModelBackend,
+    temperature: float = 0.3,
+    max_tokens: int = 300,
+) -> str:
+    """
+    Minimal LLM call for internal use: variant generation, reflection, feedback.
+    Returns plain text only, no logprobs, no caching, no template processing.
+    Raises on failure so callers can decide how to handle it.
+    """
+    try:
+        llm = _build_chat_client(
+            backend,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            with_logprobs=False,
+        )
+        return llm.invoke([HumanMessage(content=prompt_text)]).content.strip()
+    except Exception as exc:
+        logger.error(f"call_llm failed backend={backend.value}: {exc}")
+        raise
