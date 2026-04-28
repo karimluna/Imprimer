@@ -18,7 +18,7 @@ logger = get_logger(__name__)
 
 def _structured_diff(previous: str, current: str) -> str:
     """
-    Fix 6: deterministic word-level diff instead of LLM reflection.
+    Deterministic word-level diff instead of LLM reflection.
 
     Zero model calls. Tells the generator what changed so it can build
     on improvements rather than exploring random directions. More reliable
@@ -48,7 +48,7 @@ def _score_across_examples(
     backend: ModelBackend,
 ) -> tuple[float, float, float]:
     """
-    Fix 1: runs the prompt against the primary example + all extra_examples
+    Runs the prompt against the primary example + all extra_examples
     in parallel and returns averaged (reachability, quality, combined).
 
     This is only called on the GRPO winner in the evaluator — not during
@@ -127,9 +127,9 @@ def evaluator_node(state: PromptState) -> dict:
     """
     Authoritative scoring of the generator's winner.
 
-    Fix 1: Scores against primary + extra_examples in parallel, averages.
-           The group mean used for promotion reflects generalization, not
-           memorization of one input.
+    Scores against primary + extra_examples in parallel, averages.
+    The group mean used for promotion reflects generalization, not
+    memorization of one input.
 
     The run_variant call for the primary example is always a cache hit
     (GRPO already ran this exact prompt at temp=0). Extra examples add
@@ -211,7 +211,7 @@ def evaluator_node(state: PromptState) -> dict:
             f"prompt={state['current_prompt'][:60]!r}"
         )
 
-    # Fix 6: structured diff instead of LLM reflection — 0 model calls
+    # sstructured diff instead of LLM reflection now is 0 model calls
     if state["current_prompt"] != state["base_prompt"]:
         feedback = _structured_diff(state["best_prompt"], state["current_prompt"])
         updates["last_feedback"] = feedback
