@@ -138,38 +138,3 @@ def _generate_variants_with_residual(
         logger.warning(f"all parsers failed. Raw: {raw[:200]!r}")
 
     return [anchor]
-
-
-def _compute_ssc(
-    prompt: str,
-    input_example: str,
-    task: str,
-    backend: ModelBackend,
-    k: int = _SSC_RUNS,
-    temperature: float = _SSC_TEMPERATURE,
-) -> tuple[float, float, str]:
-    """
-    Semantic Self-Consistency — diagnostic only (stability.py).
-    Not used in the optimization loop.
-    """
-    results = run_variants_parallel(
-        templates=[prompt] * k,
-        input_text=input_example,
-        task=task,
-        backend=backend,
-        temperature=temperature,
-        max_workers=k,
-    )
-
-    outputs        = [r.text for r in results if r.text.strip()]
-    reachabilities = [
-        compute_reachability(r.logprobs) if r.logprobs else 0.6
-        for r in results
-    ]
-
-    if not outputs:
-        return 0.0, 0.6, ""
-
-    ssc       = pairwise_similarity(outputs) if len(outputs) > 1 else 0.6
-    avg_reach = sum(reachabilities) / len(reachabilities)
-    return round(ssc, 4), round(avg_reach, 4), outputs[0]
