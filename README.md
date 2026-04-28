@@ -169,6 +169,9 @@ Every request passes through the security layer before any LLM interaction: prom
 - **Model routing**: cascade from small to larger model when reachability plateaus, without changing the optimization loop
 - **`imprimer ui`**: TensorBoard-style dashboard reading directly from the registry
 
+### Previous Work
+
+Early version of this work used Bayesian Search + Semantic Mutation using `spacy` and `optuna`, because the computation is a constraint that must be adressed the current version evolved to use reinforcement learning as optimization and RiOT as a "mutation", this reduced computation efforts in at least 30% (along with number of LLM calls in almost half) and augmented quality of prompt generation. Future work will explore even more this combination in aspects of scalability and reliability.
 
 ## Acknowledgements
 
