@@ -18,7 +18,7 @@ var (
 // Inspired by the guides in https://github.com/spf13/cobra?tab=readme-ov-file
 var RootCmd = &cobra.Command{
 	Use:   "imprimer",
-	Short: "Imprimer — LLM prompt control platform CLI",
+	Short: "Imprimer - LLM prompt control platform CLI",
 	Long: `Imprimer measures and optimizes how precisely a prompt
 controls an LLM's output distribution.
 

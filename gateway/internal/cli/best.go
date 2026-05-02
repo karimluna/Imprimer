@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 
+	"github.com/BalorLC3/imprimer/gateway/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -50,11 +51,28 @@ prompts control the model most effectively for each task type.`,
 			return nil
 		}
 
-		fmt.Printf("\n  Task                %s\n", result.Task)
-		fmt.Printf("  Evaluations         %d\n", result.Evaluations)
-		fmt.Printf("  Avg reachability    %.4f\n", result.AvgReachability)
-		fmt.Printf("  Avg score           %.4f\n\n", result.AvgScore)
-		fmt.Printf("  Best prompt:\n  %s\n\n", result.BestTemplate)
+		body := fmt.Sprintf(
+			"%s\n%s\n%s\n%s\n\n%s\n%s",
+			ui.Metric("Task", result.Task),
+			ui.Metric("Evaluations", result.Evaluations),
+			ui.Metric(
+				"Avg reachability",
+				fmt.Sprintf("%.4f", result.AvgReachability),
+			),
+			ui.Metric(
+				"Avg score",
+				fmt.Sprintf("%.4f", result.AvgScore),
+			),
+			ui.SectionTitle("Best Prompt"),
+			ui.Prompt(result.BestTemplate),
+		)
+
+		fmt.Println(
+			ui.Panel(
+				"BEST PROMPT REGISTRY",
+				body,
+			),
+		)
 
 		return nil
 	},

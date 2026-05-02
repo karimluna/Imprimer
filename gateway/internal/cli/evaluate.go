@@ -3,7 +3,9 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
+	"github.com/BalorLC3/imprimer/gateway/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -13,7 +15,6 @@ type evaluatePayload struct {
 	VariantA string `json:"variant_a"`
 	VariantB string `json:"variant_b"`
 	Backend  string `json:"backend"`
-	UseJudge bool   `json:"use_judge"`
 }
 
 type evaluateResult struct {
@@ -43,7 +44,7 @@ var evaluateCmd = &cobra.Command{
 		backend, _ := cmd.Flags().GetString("backend")
 
 		if task == "" || variantA == "" || variantB == "" {
-			return fmt.Errorf("--task, --a, and --b are all required")
+			return fmt.Errorf("--task, --a, and --b are required")
 		}
 
 		c := NewImprimerClient(gatewayURL, apiKey)
@@ -65,24 +66,70 @@ var evaluateCmd = &cobra.Command{
 			return nil
 		}
 
-		// Formatted output
-		fmt.Printf("\n  Trace ID  %s\n", result.TraceID)
-		fmt.Printf("  Winner    variant %s\n\n", result.Winner)
-		fmt.Printf("  %-12s  score=%.3f  latency=%.0fms\n", "Variant A", result.ScoreA, result.LatencyA)
-		fmt.Printf("  %s\n\n", result.OutputA)
-		fmt.Printf("  %-12s  score=%.3f  latency=%.0fms\n", "Variant B", result.ScoreB, result.LatencyB)
-		fmt.Printf("  %s\n\n", result.OutputB)
+		fmt.Println(ui.Banner())
+
+		summary := strings.Join([]string{
+			ui.Metric("Trace ID", result.TraceID),
+			ui.Metric("Task", task),
+			ui.Metric("Backend", backend),
+			ui.Metric("Winner", "Variant "+strings.ToUpper(result.Winner)),
+		}, "\n")
+
+		fmt.Println(ui.Panel("Evaluation", summary))
+
+		barA := ui.ScoreBar(result.ScoreA, 20)
+		barB := ui.ScoreBar(result.ScoreB, 20)
+
+		table := ui.Table(
+			[2]string{"Variant A", "Variant B"},
+			[][2]string{
+				{
+					fmt.Sprintf("Score    %.3f", result.ScoreA),
+					fmt.Sprintf("Score    %.3f", result.ScoreB),
+				},
+				{
+					fmt.Sprintf("Latency  %.0fms", result.LatencyA),
+					fmt.Sprintf("Latency  %.0fms", result.LatencyB),
+				},
+				{barA, barB},
+			},
+		)
+
+		fmt.Println(ui.Panel("Scores", table))
+
+		// Loser gets a regular panel, winner gets the amber panel
+		buildBody := func(prompt, output string) string {
+			return ui.Prompt(truncate(prompt, 80)) +
+				"\n\n" +
+				output
+		}
+
+		if result.Winner == "a" {
+			fmt.Println(ui.WinnerPanel("Variant A  ★", buildBody(variantA, result.OutputA)))
+			fmt.Println(ui.Panel("Variant B", buildBody(variantB, result.OutputB)))
+		} else {
+			fmt.Println(ui.Panel("Variant A", buildBody(variantA, result.OutputA)))
+			fmt.Println(ui.WinnerPanel("Variant B  ★", buildBody(variantB, result.OutputB)))
+		}
 
 		return nil
 	},
 }
 
+// truncate shortens a string to maxLen characters with an ellipsis.
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-3] + "..."
+}
+
 func init() {
 	evaluateCmd.Flags().String("task", "", "Task type (summarize, classify, extract)")
-	evaluateCmd.Flags().String("input", "", "Input text to process")
-	evaluateCmd.Flags().String("a", "", "First prompt template (use {input} as placeholder)")
-	evaluateCmd.Flags().String("b", "", "Second prompt template (use {input} as placeholder)")
-	evaluateCmd.Flags().String("backend", "ollama", "Model backend: ollama or openai")
+	evaluateCmd.Flags().String("input", "", "Input text (optional for some tasks)")
+	evaluateCmd.Flags().String("a", "", "First prompt template")
+	evaluateCmd.Flags().String("b", "", "Second prompt template")
+	evaluateCmd.Flags().String("backend", "ollama", "ollama or openai")
 
 	RootCmd.AddCommand(evaluateCmd)
 }
