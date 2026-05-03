@@ -116,14 +116,6 @@ var evaluateCmd = &cobra.Command{
 	},
 }
 
-// truncate shortens a string to maxLen characters with an ellipsis.
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen-3] + "..."
-}
-
 func init() {
 	evaluateCmd.Flags().String("task", "", "Task type (summarize, classify, extract)")
 	evaluateCmd.Flags().String("input", "", "Input text (optional for some tasks)")
