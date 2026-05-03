@@ -3,7 +3,9 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
+	"github.com/BalorLC3/imprimer/gateway/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -33,18 +35,16 @@ type optimizeResult struct {
 
 var optimizeCmd = &cobra.Command{
 	Use:   "optimize",
-	Short: "Run Bayesian optimization (Optuna TPE) to find the best prompt",
-	Long: `Searches over prompt mutations using Optuna's Tree-structured
-Parzen Estimator to maximize reachability + similarity to expected output.
-
-Each trial costs one LLM inference call. With n=20 trials, the optimizer
-typically converges within 8-10 trials after the initial random exploration.`,
+	Short: "Run Reflective Prompt Evolution to find the best prompt",
+	Long: `Runs LLM-generated variant search inside a LangGraph control loop.
+Each iteration generates N variants, scores them with SSC and reachability,
+and feeds verbal reflection back into the next cycle.`,
 	Example: `  imprimer optimize \
     --task summarize \
     --prompt "Summarize this in one sentence: {input}" \
     --input "Minsky argued intelligence emerges from many small agents" \
-    --expected "Minsky argued intelligence is an emergent property of simple agents." \
-    --trials 20`,
+    --variants 4 \
+    --max-iterations 3`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		task, _ := cmd.Flags().GetString("task")
 		prompt, _ := cmd.Flags().GetString("prompt")
@@ -56,14 +56,11 @@ typically converges within 8-10 trials after the initial random exploration.`,
 		maxIterations, _ := cmd.Flags().GetInt32("max-iterations")
 
 		if task == "" || prompt == "" {
-			return fmt.Errorf("--task are --prompt are required")
+			return fmt.Errorf("--task and --prompt are required")
 		}
 		if variants <= 0 {
 			return fmt.Errorf("--variants must be greater than 0")
 		}
-
-		fmt.Printf("\n  Running %d optimization trials for task '%s'...\n", variants, task)
-		fmt.Printf("  Base prompt: %s\n\n", prompt)
 
 		c := NewImprimerClient(gatewayURL, apiKey)
 
@@ -87,20 +84,80 @@ typically converges within 8-10 trials after the initial random exploration.`,
 			return nil
 		}
 
-		// Formatted output
+		fmt.Println(ui.Banner())
+
+		// Run summary
+		status := "iteration cap reached"
+		if result.TargetReached {
+			status = "target reached ✓"
+		}
+
 		sign := "+"
 		if result.Improvement < 0 {
 			sign = ""
 		}
-		fmt.Printf("  GRPO Mean             %.4f (across %d iterations)\n",
-			result.GRPOGroupMean, result.IterationsCompleted)
-		fmt.Printf("  Target reached      %v\n", result.TargetReached)
-		fmt.Printf("  Baseline score      %.4f  (reachability %.4f)\n",
-			result.BaselineScore, result.BaselineReachability)
-		fmt.Printf("  Best score          %.4f  (reachability %.4f)\n",
-			result.BestScore, result.BestReachability)
-		fmt.Printf("  Improvement         %s%.4f\n\n", sign, result.Improvement)
-		fmt.Printf("  Best prompt:\n  %s\n\n", result.BestPrompt)
+
+		summary := strings.Join([]string{
+			ui.Metric("Task", task),
+			ui.Metric("Backend", backend),
+			ui.Metric("Variants / iter", variants),
+			ui.Metric("Iterations", fmt.Sprintf("%d / %d", result.IterationsCompleted, maxIterations)),
+			ui.Metric("Status", status),
+		}, "\n")
+
+		fmt.Println(ui.Panel("Optimization Run", summary))
+
+		// Score comparison table
+		baseBar := ui.ScoreBar(result.BaselineScore, 20)
+		bestBar := ui.ScoreBar(result.BestScore, 20)
+
+		rows := [][2]string{
+			{
+				fmt.Sprintf("Score        %.4f", result.BaselineScore),
+				fmt.Sprintf("Score        %.4f", result.BestScore),
+			},
+			{
+				fmt.Sprintf("Reachability %.4f", result.BaselineReachability),
+				fmt.Sprintf("Reachability %.4f", result.BestReachability),
+			},
+			{baseBar, bestBar},
+			{
+				"Improvement  —",
+				fmt.Sprintf("Improvement  %s%.4f", sign, result.Improvement),
+			},
+		}
+
+		if result.GRPOGroupMean > 0 {
+			grpoBar := ui.ScoreBar(result.GRPOGroupMean, 20)
+			rows = append(rows,
+				[2]string{
+					"GRPO mean    —",
+					fmt.Sprintf("GRPO mean    %.4f", result.GRPOGroupMean),
+				},
+				[2]string{"—", grpoBar},
+			)
+		}
+
+		fmt.Println(ui.Panel("Score Comparison", ui.Table(
+			[2]string{"Baseline", "Best Found"},
+			rows,
+		)))
+
+		// Prompt comparison
+		fmt.Println(ui.Panel("Prompts", ui.Table(
+			[2]string{"Original", "Optimized"},
+			[][2]string{
+				{
+					ui.Prompt(truncate(prompt, 60)),
+					ui.Prompt(truncate(result.BestPrompt, 60)),
+				},
+			},
+		)))
+
+		// AI reflection
+		if result.Feedback != "" {
+			fmt.Println(ui.Panel("AI Reflection", result.Feedback))
+		}
 
 		return nil
 	},
@@ -109,14 +166,14 @@ typically converges within 8-10 trials after the initial random exploration.`,
 func init() {
 	optimizeCmd.Flags().String("task", "", "Task type (summarize, classify, extract)")
 	optimizeCmd.Flags().String("prompt", "", "Base prompt template to optimize")
-	optimizeCmd.Flags().String("input", "", "Example input for evaluation")
-	optimizeCmd.Flags().String("expected", "", "Expected output for similarity scoring")
-	optimizeCmd.Flags().Int32("variants", 4, "Number of variants to creat for Group Relative Optimization")
-	optimizeCmd.Flags().String("backend", "ollama", "Model backend: ollama or openai")
+	optimizeCmd.Flags().String("input", "", "Example input (optional)")
+	optimizeCmd.Flags().String("expected", "", "Expected output for similarity scoring (optional)")
+	optimizeCmd.Flags().Int32("variants", 4, "Variants per iteration")
+	optimizeCmd.Flags().String("backend", "ollama", "ollama or openai")
 	optimizeCmd.Flags().Float32("target-reachability", 0.80,
 		"Stop when reachability >= this value (paper ceiling: 0.97)")
 	optimizeCmd.Flags().Int32("max-iterations", 3,
-		"Max graph cycles (total LLM calls = variants × iterations)")
+		"Max graph cycles (total LLM calls ≈ variants × iterations)")
 
 	RootCmd.AddCommand(optimizeCmd)
 }
