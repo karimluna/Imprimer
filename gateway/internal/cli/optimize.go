@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/karimluna/imprimer/gateway/internal/ui"
 	"github.com/spf13/cobra"
@@ -64,8 +65,33 @@ and feeds verbal reflection back into the next cycle.`,
 
 		c := NewImprimerClient(gatewayURL, apiKey)
 
+		// start spinner
+		if !outputJSON {
+			fmt.Print("\n🧠 Imprimer is thinking... (running graph iterations)")
+		}
+
+		done := make(chan bool)
+
+		// Run the dots in the background
+		if !outputJSON {
+			go func() {
+				for {
+					select {
+					case <-done:
+						return
+					default:
+						// Import "time" at the top of your file to use time.Sleep
+						fmt.Print(".")
+						time.Sleep(1 * time.Second)
+					}
+				}
+			}()
+		}
+
 		var result optimizeResult
-		if err := c.post("/optimize", optimizePayload{
+
+		// Blocking call
+		err := c.post("/optimize", optimizePayload{
 			Task:               task,
 			BasePrompt:         prompt,
 			InputExample:       input,
@@ -74,7 +100,15 @@ and feeds verbal reflection back into the next cycle.`,
 			Backend:            backend,
 			TargetReachability: targetReach,
 			MaxIterations:      maxIterations,
-		}, &result); err != nil {
+		}, &result)
+
+		// stop spinner
+		if !outputJSON {
+			done <- true
+			fmt.Println(" Done!") // Moves to the next line before printing results
+		}
+
+		if err != nil {
 			return err
 		}
 

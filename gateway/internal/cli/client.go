@@ -24,7 +24,7 @@ func NewImprimerClient(baseURL, apiKey string) *ImprimerClient {
 		baseURL: baseURL,
 		apiKey:  apiKey,
 		httpClient: &http.Client{
-			Timeout: 300 * time.Second,
+			Timeout: 10 * time.Minute,
 		},
 	}
 }
