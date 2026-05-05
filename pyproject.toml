@@ -1,0 +1,24 @@
+[project]
+name = "imprimer"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "dotenv>=0.9.9",
+    "gradio>=6.12.0",
+    "grpcio==1.80.0",
+    "grpcio-tools==1.80.0",
+    "langchain>=1.2.15",
+    "langchain-community>=0.4.1",
+    "langchain-ollama>=1.0.1",
+    "langchain-openai==1.1.12",
+    "langgraph>=1.1.6",
+    "optuna>=4.2.0",
+    "protobuf>6.31.1",
+    "psycopg2>=2.9.12",
+    "pytest>=9.0.3",
+    "requests>=2.32.0",
+    "sentence-transformers>=5.4.1",
+    "spacy>=3.8.14",
+]
