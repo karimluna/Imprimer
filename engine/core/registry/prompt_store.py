@@ -1,13 +1,5 @@
 """
 Prompt registry.
-
-Persists every evaluation result so prompt quality can be tracked
-over time. A prompt that consistently scores high reachability
-is a well-controlled prompt - the registry makes that visible.
-
-Storage: SQLite for the MVP, zero infrastructure, file-based,
-inspectable with any SQLite viewer. We may swap for Postgres in
-production by changing _get_conn() only. Nothing else changes.
 """
 
 import sqlite3
@@ -16,24 +8,6 @@ import os
 from pathlib import Path
 from dataclasses import dataclass
 
-import psycopg2
-from utils.create_logger import get_logger
-
-
-logger = get_logger(__name__)
-
-DB_PATH = Path("data/prompt_registry.db")
-
-
-
-import sqlite3
-import time
-import os
-from pathlib import Path
-from dataclasses import dataclass
-
-import psycopg2
-import psycopg2.extras
 
 from utils.create_logger import get_logger
 
@@ -46,6 +20,13 @@ DB_PATH = Path("data/prompt_registry.db")
 def _use_postgres():
     return os.getenv("USE_POSTGRES", "false").lower() == "true"
 
+if _use_postgres:
+    try: 
+        import psycopg2
+        import psycopg2.extras
+    except Exception as e:
+        logger.critical(f"PostgreSQL is not in env {e}")
+        
 
 def _get_conn():
     if _use_postgres():

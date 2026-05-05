@@ -8,9 +8,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from core.optimizer.state import PromptState
 from core.optimizer.grpo import run_grpo
 from core.optimizer.rpe import extract_residual_content
-from core.chains.prompt_chain import ModelBackend, run_variant, call_llm
+from core.chains.prompt_chain import ModelBackend, run_variant
 from core.evaluator.scorer import rank_score
-from core.registry.prompt_store import OptimizationTrialRecord, save_optimization_trial
 from utils.create_logger import get_logger
 
 logger = get_logger(__name__)
@@ -178,23 +177,6 @@ def evaluator_node(state: PromptState) -> dict:
     if not state.get("run_id"):
         updates["run_id"] = run_id
 
-    try:
-        save_optimization_trial(OptimizationTrialRecord(
-            run_id=run_id,
-            task=state["task"],
-            backend=state["backend"],
-            base_prompt=state["base_prompt"],
-            candidate_prompt=state["current_prompt"],
-            mutation="grpo_rpe",
-            trial_number=iteration,
-            score=avg_combined,
-            reachability=avg_reach,
-            similarity=avg_quality,
-            latency_ms=0.0,
-            is_best=is_new_best,
-        ))
-    except Exception as exc:
-        logger.error(f"registry save failed: {exc}")
 
     if is_new_best:
         new_residual = extract_residual_content(state["current_prompt"])
