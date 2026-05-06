@@ -53,6 +53,8 @@ def run_grpo(
     input_example: str,
     expected_output: str,
     backend: ModelBackend,
+    iteration: int,
+    max_iterations: int,
     feedback: str = "",
     n_variants: int = N_VARIANTS,
     current_best_prompt: Optional[str] = None,
@@ -70,6 +72,8 @@ def run_grpo(
         feedback=feedback,
         n_variants=n_variants,
         backend=backend,
+        iteration=iteration,
+        max_iterations=max_iterations,
         task=task,
         current_best_prompt=anchor,
         residual_content=residual_content,
@@ -95,7 +99,7 @@ def run_grpo(
             "variant":      variant_str,
             "reachability": s.reachability,
             "similarity":   s.similarity,
-            "score":        s.combined,
+            "score":        s.reachability, # the optimizer and gatekeeper disagree on what better means if s.combined
         }
 
     history: list[dict] = []
