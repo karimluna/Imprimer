@@ -138,6 +138,8 @@ def generator_node(state: PromptState) -> dict:
         input_example=state["input_example"],
         expected_output=state["expected_output"],
         backend=backend,
+        iteration=iteration,
+        max_iterations=state['max_iterations'],
         feedback=state.get("last_feedback", ""),
         n_variants=state["n_variants"],
         current_best_prompt=anchor,
