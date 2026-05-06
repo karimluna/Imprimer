@@ -58,6 +58,8 @@ def _generate_variants_with_residual(
     feedback: str,
     n_variants: int,
     backend: ModelBackend,
+    iteration: int,
+    max_iterations: int,
     task: str,
     current_best_prompt: Optional[str] = None,
     residual_content: str = "",
@@ -82,24 +84,28 @@ def _generate_variants_with_residual(
     ) if residual_content.strip() else ""
 
     generation_prompt = (
-        f"You are improving an AI prompt for the task: {task}\n\n"
+        f"You are an expert prompt engineer optimizing for the task: {task}\n\n"
         f"Current best prompt:\n{anchor}\n"
         f"{feedback_block}"
         f"{residual_block}"
-        f"Write {n_variants} improved versions. Each must:\n"
-        f"- Keep {{input}} exactly as written\n"
-        f"- Change only wording, tone, or instruction style (one change per version)\n"
-        f"- Be a complete, usable instruction\n\n"
-        f"Respond with ONLY a JSON array, no other text. Example format:\n"
-        f'["improved prompt 1", "improved prompt 2"]'
+        f"Write {n_variants} improved versions. Use DIFFERENT STRATEGIES:\n"
+        f"- Version 1: Add chain-of-thought reasoning steps or scaffolding\n"
+        f"- Version 2: Add a concrete example or analogy\n"  
+        f"- Version 3: Restructure the instruction for clarity and specificity\n"
+        f"- Version 4: Add constraints on output format or reasoning approach\n"
+        f"Each must keep {{input}} exactly as written.\n"
+        f"Each must be a complete, usable instruction.\n\n"
+        f"Respond with ONLY a JSON array: [\"prompt1\", \"prompt2\", ...]"
     )
 
     raw = ""
+    temperature = 0.9 - 0.4 * (iteration / max(max_iterations, 1))
+    temperature = max(0.3, min(0.9, temperature))
     try:
         raw = call_llm(
             prompt_text=generation_prompt,
             backend=backend,
-            temperature=0.7,
+            temperature=temperature,
             max_tokens=600,
         )
 
